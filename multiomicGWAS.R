@@ -657,7 +657,6 @@ multiomicGWAS <- function(
               GWAS_scores_effects$varX <- 2 * GWAS_scores_effects$MAF * (1 - GWAS_scores_effects$MAF) * as.numeric(ploidy)
               # additive
               GWAS_scores_effects$additive_PVE <- (GWAS_scores_effects$additive_effect^2 * GWAS_scores_effects$varX) / var_y
-              # dominance levels
               for(d in c("1","2","3","4")){
                 alt_col <- paste0(d,"-dom-alt_effect")
                 ref_col <- paste0(d,"-dom-ref_effect")
@@ -786,15 +785,52 @@ multiomicGWAS <- function(
               #     }}
               # }
 
+              # --- Determine dominance terms based on ploidy ---
+              get_dom_terms <- function(ploidy) {
+                # diploid (2): only 1 level of dominance
+                max_dom <- ploidy / 2
+                dom_terms <- c()
+                for (i in 1:max_dom) {
+                  dom_terms <- c(
+                    dom_terms,
+                    paste0(i, "-dom-alt_PVE"),
+                    paste0(i, "-dom-ref_PVE")
+                  )
+                }
+                return(dom_terms)
+              }
+              dom_terms <- get_dom_terms(ploidy)
+              # filter only columns that exist in the dataset
+              dom_terms <- dom_terms[dom_terms %in% colnames(GWAS_scores_effects)]
+              # --- Build wide table ---
               GWAS_scores_effects_wide <- GWAS_scores_effects %>%
-                select(SNP, MAF, additive_PVE, `1-dom-alt_PVE`, `1-dom-alt_PVE` = `1-dom-alt_PVE`)
+                select(SNP, MAF, additive_PVE, all_of(dom_terms))
+              # --- Pivot longer ---
               GWAS_scores_effects_long <- GWAS_scores_effects_wide %>%
-                pivot_longer(cols = c(additive_PVE, `1-dom-alt_PVE`, `1-dom-alt_PVE`),names_to = "Model",values_to = "PVE"
+                pivot_longer(
+                  cols = -c(SNP, MAF),
+                  names_to = "Model",
+                  values_to = "PVE"
                 ) %>%
-                mutate(Model = case_when(Model %in% c("additive_PVE", "PVE_additive") ~ "additive",
-                                         Model %in% c("1-dom-ralt_PVE", "1-dom-alt_PVE") ~ "1-dom-alt",Model %in% c("1-dom-ref_PVE") ~ "1-dom-ref",
-                                         TRUE ~ Model)
+                mutate(
+                  # clean model labels
+                  Model = case_when(
+                    Model == "additive_PVE" ~ "additive",
+                    str_detect(Model, "dom-alt") ~ str_replace(Model, "_PVE", ""),
+                    str_detect(Model, "dom-ref") ~ str_replace(Model, "_PVE", ""),
+                    TRUE ~ Model
+                  )
                 )
+
+              # GWAS_scores_effects_wide <- GWAS_scores_effects %>%
+              #   select(SNP, MAF, additive_PVE, `1-dom-alt_PVE`, `1-dom-alt_PVE` = `1-dom-alt_PVE`)
+              # GWAS_scores_effects_long <- GWAS_scores_effects_wide %>%
+              #   pivot_longer(cols = c(additive_PVE, `1-dom-alt_PVE`, `1-dom-alt_PVE`),names_to = "Model",values_to = "PVE"
+              #   ) %>%
+              #   mutate(Model = case_when(Model %in% c("additive_PVE", "PVE_additive") ~ "additive",
+              #                            Model %in% c("1-dom-ralt_PVE", "1-dom-alt_PVE") ~ "1-dom-alt",Model %in% c("1-dom-ref_PVE") ~ "1-dom-ref",
+              #                            TRUE ~ Model)
+              #   )
               colnames(GWAS_scores_effects_long)[1] <- "Marker"
               data_fdr <- set.threshold(GWAS.fitted,method="FDR",level=0.05,n.core=cores)
               SigQTL_fdr <- get.QTL(data_fdr)
