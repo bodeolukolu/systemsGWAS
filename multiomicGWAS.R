@@ -823,7 +823,8 @@ multiomicGWAS <- function(
               dom_terms <- dom_terms[dom_terms %in% colnames(GWAS_scores_effects)]
               # --- Build wide table ---
               GWAS_scores_effects_wide <- GWAS_scores_effects %>%
-                select(SNP, MAF, additive_PVE, all_of(dom_terms))
+                dplyr::select(SNP,MAF,additive_PVE,dplyr::all_of(dom_terms))
+
               # --- Pivot longer ---
               GWAS_scores_effects_long <- GWAS_scores_effects_wide %>%
                 pivot_longer(
