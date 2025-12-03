@@ -661,36 +661,31 @@ multiomicGWAS <- function(
                 return(col)
               })
               geno_mat_imputed <- as.matrix(geno_mat_imputed)
-              # additive PVE
-              if("additive_effects" %in% colnames(GWAS_scores_effects)) {
-                snps <- GWAS_scores_effects$SNP
-                vX <- varX[match(snps, colnames(geno_matrix_imputed))]
-                GWAS_scores_effects$additive_PVE <- pmin((GWAS_scores_effects$additive_effects^2 * vX) / var_y, 1)
-              }
-              compute_pve_polyploid <- function(GWAS_scores_effects, geno_matrix_imputed, var_y, ploidy) {
-                max_dom <- ploidy / 2  # maximum dominance level
-                # compute SNP variance (dosage variance)
-                varX <- apply(geno_matrix_imputed, 2, var, na.rm = TRUE)
-                for(d in 1:max_dom){
-                  alt_col <- paste0(d, "-dom-alt_effects")
-                  ref_col <- paste0(d, "-dom-ref_effects")
-                  # alt dominance PVE
-                  if(alt_col %in% colnames(GWAS_scores_effects)) {
-                    snps <- GWAS_scores_effects$SNP
-                    # use corresponding genotype variance
-                    vX <- varX[match(snps, colnames(geno_matrix_imputed))]
-                    GWAS_scores_effects[[paste0(d,"-dom-alt_PVE")]] <- pmin((GWAS_scores_effects[[alt_col]]^2 * vX) / var_y, 1)
-                  }
-                  # ref dominance PVE
-                  if(ref_col %in% colnames(GWAS_scores_effects)) {
-                    snps <- GWAS_scores_effects$SNP
-                    vX <- varX[match(snps, colnames(geno_matrix_imputed))]
-                    GWAS_scores_effects[[paste0(d,"-dom-ref_PVE")]] <- pmin((GWAS_scores_effects[[ref_col]]^2 * vX) / var_y, 1)
-                  }
+              max_dom <- ploidy / 2  # maximum dominance level
+              # compute SNP variance (dosage variance)
+              varX <- apply(geno_matrix_imputed, 2, var, na.rm = TRUE)
+              # compute additive PVE
+              snps <- GWAS_scores_effects$SNP
+              vX <- varX[match(snps, colnames(geno_matrix_imputed))]
+              GWAS_scores_effects$additive_PVE <- pmin((GWAS_scores_effects$additive_effects^2 * vX) / var_y, 1)
+              # compute dominance PVE
+              for(d in 1:max_dom){
+                alt_col <- paste0(d, "-dom-alt_effects")
+                ref_col <- paste0(d, "-dom-ref_effects")
+                # alt dominance PVE
+                if(alt_col %in% colnames(GWAS_scores_effects)) {
+                  snps <- GWAS_scores_effects$SNP
+                  # use corresponding genotype variance
+                  vX <- varX[match(snps, colnames(geno_matrix_imputed))]
+                  GWAS_scores_effects[[paste0(d,"-dom-alt_PVE")]] <- pmin((GWAS_scores_effects[[alt_col]]^2 * vX) / var_y, 1)
                 }
-                return(GWAS_scores_effects)
+                # ref dominance PVE
+                if(ref_col %in% colnames(GWAS_scores_effects)) {
+                  snps <- GWAS_scores_effects$SNP
+                  vX <- varX[match(snps, colnames(geno_matrix_imputed))]
+                  GWAS_scores_effects[[paste0(d,"-dom-ref_PVE")]] <- pmin((GWAS_scores_effects[[ref_col]]^2 * vX) / var_y, 1)
+                }
               }
-              compute_pve_polyploid(GWAS_scores_effects, geno_matrix_imputed, var_y, ploidy)
 
               write.table(GWAS_scores_effects, file=paste("./scores_effects/","score_effects_",colnames(pheno)[2],".txt",sep=""), row.names=F, quote = FALSE, sep = "\t")
               colnames(GWAS_logP) <- gsub("_scores", "", colnames(GWAS_logP)); GWAS_logP <- GWAS_logP[,-1]
@@ -1004,8 +999,8 @@ multiomicGWAS <- function(
                 }
                 if (biparental == TRUE) {
                   manplot <- ggplot(scores, aes(x = Chrom_bp, y=scores, group=Chrom)) +
-                    geom_line(aes(colour=factor(Chrom), y=rollmean(scores, 2, na.pad=TRUE)), size=3) + theme(text = element_text(size=40)) +
-                    geom_point(size=1, pch=".", aes(colour=factor(Chrom)))+
+                    geom_line(aes(colour=factor(Chrom), y=rollmean(scores, 2, na.pad=TRUE)), size=3, show.legend = FALSE) + theme(text = element_text(size=40)) +
+                    geom_point(size=1, pch=".", aes(colour=factor(Chrom)), show.legend = FALSE)+
                     scale_color_manual(values=c('cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange',
                                                 'cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange',
                                                 'cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange',
@@ -1063,7 +1058,7 @@ multiomicGWAS <- function(
                 }
                 if (biparental == TRUE) {
                   manplot <- ggplot(scores, aes(x = Chrom_bp, y=scores, group=Chrom)) +
-                    geom_line(aes(colour=factor(Chrom), y=rollmean(scores, 2, na.pad=TRUE)), size=3) + theme(text = element_text(size=40)) +
+                    geom_line(aes(colour=factor(Chrom), y=rollmean(scores, 2, na.pad=TRUE)), size=3, show.legend = FALSE) + theme(text = element_text(size=40)) +
                     geom_point(size=1, pch=".", aes(colour=factor(Chrom)), show.legend = FALSE)+
                     scale_color_manual(values=c('cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange',
                                                 'cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange',
@@ -1122,7 +1117,7 @@ multiomicGWAS <- function(
                 }
                 if (biparental == TRUE) {
                   manplot <- ggplot(scores, aes(x = Chrom_bp, y=scores, group=Chrom)) +
-                    geom_line(aes(colour=factor(Chrom), y=rollmean(scores, 2, na.pad=TRUE)), size=3) + theme(text = element_text(size=40)) +
+                    geom_line(aes(colour=factor(Chrom), y=rollmean(scores, 2, na.pad=TRUE)), size=3, show.legend = FALSE) + theme(text = element_text(size=40)) +
                     geom_point(size=1, pch=".", aes(colour=factor(Chrom)), show.legend = FALSE)+
                     scale_color_manual(values=c('cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange',
                                                 'cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange',
@@ -1181,7 +1176,7 @@ multiomicGWAS <- function(
                 }
                 if (biparental == TRUE) {
                   manplot <- ggplot(scores, aes(x = Chrom_bp, y=scores, group=Chrom)) +
-                    geom_line(aes(colour=factor(Chrom), y=rollmean(scores, 2, na.pad=TRUE)), size=3) + theme(text = element_text(size=40)) +
+                    geom_line(aes(colour=factor(Chrom), y=rollmean(scores, 2, na.pad=TRUE)), size=3, show.legend = FALSE) + theme(text = element_text(size=40)) +
                     geom_point(size=1, pch=".", aes(colour=factor(Chrom)), show.legend = FALSE)+
                     scale_color_manual(values=c('cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange',
                                                 'cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange','cornflowerblue','orange',
