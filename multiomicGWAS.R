@@ -627,6 +627,7 @@ multiomicGWAS <- function(
             colnames(GWAS_logP) <- paste0(colnames(GWAS_logP), "_scores")
             rownames(GWAS_logP) <- GWAS_logP$SNP; GWAS_logP <- GWAS_logP[,-1]
             GWAS_logP <- cbind(SNP = rownames(GWAS_logP), GWAS_logP)
+            colnames(GWAS_logP) <- gsub("^scores\\.", "", colnames(GWAS_logP))
 
             if ( !is.null(GWAS_logP) ) {
               GWAS_effects <- GWAS.fitted@effects[[colnames(pheno[2])]]
@@ -655,30 +656,46 @@ multiomicGWAS <- function(
               colnames(GWAS_scores_effects) <- gsub("^scores\\.", "", colnames(GWAS_scores_effects))
 
               # Calculate PVE
-              # compute SNP dosage variance for PVE (polyploid-adjusted)
-              GWAS_scores_effects$varX <- 2 * GWAS_scores_effects$MAF * (1 - GWAS_scores_effects$MAF) * as.numeric(ploidy)
-              # additive
-              GWAS_scores_effects$additive_PVE <- (GWAS_scores_effects$additive_effects^2 * GWAS_scores_effects$varX) / var_y
-              # Determine number of dominance levels based on ploidy
-              max_dom <- ploidy / 2
-              for(d in 1:max_dom){
-                alt_col <- paste0(d, "-dom-alt_effects")
-                ref_col <- paste0(d, "-dom-ref_effects")
-                # alt dominance PVE if column exists
-                if (alt_col %in% colnames(GWAS_scores_effects)) {GWAS_scores_effects[[paste0(d, "-dom-alt_PVE")]] <- (GWAS_scores_effects[[alt_col]]^2 / var_y)}
-
-                # ref dominance PVE if column exists
-                if (ref_col %in% colnames(GWAS_scores_effects)) {GWAS_scores_effects[[paste0(d, "-dom-ref_PVE")]] <- (GWAS_scores_effects[[ref_col]]^2 / var_y)}
+              # Check for remaining NAs
+              sum(is.na(geno_matrix_imputed))
+              compute_pve_polyploid <- function(GWAS_scores_effects, geno_matrix_imputed, var_y, ploidy) {
+                max_dom <- ploidy / 2  # maximum dominance level
+                # compute SNP variance (dosage variance)
+                varX <- apply(geno_matrix_imputed, 2, var, na.rm = TRUE)
+                for(d in 1:max_dom){
+                  alt_col <- paste0(d, "-dom-alt_effects")
+                  ref_col <- paste0(d, "-dom-ref_effects")
+                  # alt dominance PVE
+                  if(alt_col %in% colnames(GWAS_scores_effects)) {
+                    snps <- GWAS_scores_effects$SNP
+                    # use corresponding genotype variance
+                    vX <- varX[match(snps, colnames(geno_matrix_imputed))]
+                    GWAS_scores_effects[[paste0(d,"-dom-alt_PVE")]] <- pmin((GWAS_scores_effects[[alt_col]]^2 * vX) / var_y, 1)
+                  }
+                  # ref dominance PVE
+                  if(ref_col %in% colnames(GWAS_scores_effects)) {
+                    snps <- GWAS_scores_effects$SNP
+                    vX <- varX[match(snps, colnames(geno_matrix_imputed))]
+                    GWAS_scores_effects[[paste0(d,"-dom-ref_PVE")]] <- pmin((GWAS_scores_effects[[ref_col]]^2 * vX) / var_y, 1)
+                  }
+                }
+                # additive PVE (optional)
+                if("additive_effects" %in% colnames(GWAS_scores_effects)) {
+                  snps <- GWAS_scores_effects$SNP
+                  vX <- varX[match(snps, colnames(geno_matrix_imputed))]
+                  GWAS_scores_effects$additive_PVE <- pmin((GWAS_scores_effects$additive_effects^2 * vX) / var_y, 1)
+                }
+                return(GWAS_scores_effects)
               }
-              # Remove varX or varx column safely (case-insensitive)
-              GWAS_scores_effects <- GWAS_scores_effects[ ,!tolower(names(GWAS_scores_effects)) %in% "varx"]
+              compute_pve_polyploid(GWAS_scores_effects, geno_matrix_imputed, var_y, ploidy)
 
               write.table(GWAS_scores_effects, file=paste("./scores_effects/","score_effects_",colnames(pheno)[2],".txt",sep=""), row.names=F, quote = FALSE, sep = "\t")
               colnames(GWAS_logP) <- gsub("_scores", "", colnames(GWAS_logP)); GWAS_logP <- GWAS_logP[,-1]
               colnames(GWAS_effects) <- gsub("_effects", "", colnames(GWAS_effects)); GWAS_effects <- GWAS_effects[,-1]
 
+              score_models <- colnames(pvalues)
               pvalues <- as.data.frame(10^(-1 * as.data.frame(GWAS_logP)))
-              if(ncol(pvalues) ==1 ){colnames(pvalues) <- models}
+              if(ncol(pvalues) ==1 ){colnames(pvalues) <- score_models}
               pvalues <- as.data.frame(reshape2::melt(pvalues)); colnames(pvalues) <- c("model","pvalue")
               pvalues <- na.omit(pvalues); pvalues$pvalue <- as.numeric(as.character(pvalues$pvalue))
               ps <- pvalues; ci <- 0.95
@@ -687,7 +704,7 @@ multiomicGWAS <- function(
               ps$expected <- ps$model; ps$clower <- ps$model; ps$cupper <- ps$model
               ps$expected <- ps$clower <- ps$cupper <- rep(NA_real_, nrow(ps))
 
-              for (jj in models) {
+              for (jj in score_models) {
                 count_df <- as.data.frame(table(ps$model))
                 count_sub <- subset(count_df, Var1 == jj)  # use count_sub here
 
@@ -710,11 +727,11 @@ multiomicGWAS <- function(
               ps$clower <- as.numeric(as.character(ps$clower))
               ps$cupper <- as.numeric(as.character(ps$cupper))
               log10Pe <- expression(paste("Expected -log"[10],plain(P),sep="")); log10Po <- expression(paste("Observed -log"[10], plain(P),sep=""))
-              qqplot_metric <- setNames(data.frame(matrix(ncol = 3, nrow = 0)), c("model","dev_norm_avGW"))
-              for (jjj in c(models)) {
+              qqplot_metric <- setNames(data.frame(matrix(ncol = 3, nrow = 0)), c("model","Trait","dev_norm_avGW"))
+              for (jjj in c(score_models)) {
                 psout <- subset(ps, ps$model == jjj)
                 dev_norm_av <- round(mean(psout$observed - psout$expected), digits=5)
-                qqplot_metric1 <- as.data.frame(t(c(j,dev_norm_av))); names(qqplot_metric1) <- c("model","dev_norm_avGW")
+                qqplot_metric1 <- as.data.frame(t(c(jjj,colnames(pheno[2]),dev_norm_av))); names(qqplot_metric1) <- c("model","Trait","dev_norm_avGW")
                 qqplot_metric <- rbind(qqplot_metric, qqplot_metric1)
               }
               write.table(qqplot_metric, file=paste("./qqplots/",colnames(pheno)[2],"_qqplot_metric.txt",sep=""), row.names=F, quote = FALSE, sep = "\t")
@@ -914,7 +931,7 @@ multiomicGWAS <- function(
                 permute_threshold <- setDT(as.data.frame(permute_threshold), keep.rownames = TRUE)
                 colnames(permute_threshold) <- c("model","threshold")
                 hline.permute <- data.frame(z3 = c(permute_threshold$threshold), models = c(permute_threshold$model))
-              } else { z3 <- -1 ; hline.permute <- NULL }
+              } else { z3 <- -1 ; hline.permute <- NULL; threshold_permute <- FALSE }
               if (!exists("threshold_suggestive")){z4 <- -1; hline.suggestive_threshold <- NULL }
               if (is.null(threshold_suggestive)){z4 <- -1; hline.suggestive_threshold <- NULL }
               if (exists("threshold_suggestive")){
@@ -924,6 +941,9 @@ multiomicGWAS <- function(
               }
               if (threshold_FDR == FALSE) {z1 <- -1 ; hline.fdr <- NULL}
               if (threshold_Bonferroni == FALSE) {z2 <- -1 ; hline.Bonferroni <- NULL}
+              scores$Chrom <- gsub("CHR", "", scores$Chrom, ignore.case = TRUE)
+              scores$Chrom <- gsub("CHROM", "", scores$Chrom, ignore.case = TRUE)
+              scores$Chrom <- as.numeric(scores$Chrom)
               scores <- scores %>%
                 arrange(Chrom, bp) %>%
                 mutate(Chrom = factor(Chrom, levels = unique(Chrom)),
@@ -931,17 +951,16 @@ multiomicGWAS <- function(
               scores$Chrom <- factor(scores$Chrom, levels = sort(as.numeric(levels(scores$Chrom))))
 
               # Create a dummy data frame for legend
-              legend_df <- data.frame(
-                x = 1:length(c("FDR", "Bonferroni", "Permutation", "Suggestive")),
+              legend_df <- data.frame(x = 1:length(c("FDR", "Bonferroni", "Permutation", "Suggestive")),
                 y = 1,  # dummy y, won't affect plot
                 label = c("FDR", "Bonferroni", "Permutation", "Suggestive"),
-                color = c("grey10", "tomato", "green4", "cornflowerblue")
-              )
+                color = c("grey10", "tomato", "green4", "cornflowerblue"))
               if(is.null(threshold_suggestive)) {threshold_suggested <- FALSE} else {threshold_suggested <- TRUE}
               if(permutations <= 1) {threshold_permuted <- FALSE}
               legend_df$value <- c(threshold_FDR, threshold_Bonferroni, threshold_permuted, threshold_suggested)
-              legend_df <- subset(legend_df, value == TRUE); legend_df <- legend_df[,-5]
+              legend_df <- subset(legend_df, value == TRUE)
               legend_df$threshold <- factor(legend_df$label, levels = legend_df$label)
+
 
 
               if (ploidy == 2) {
@@ -971,11 +990,13 @@ multiomicGWAS <- function(
                           panel.border = element_blank(), strip.background = element_blank(), axis.text.x=element_blank(),
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
-                    theme(legend.position = "right") + theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
+                    theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds")) +
-                    labs(title= paste(colnames(pheno)[2],"\n",sep=""), size=40)
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
+                    coord_cartesian(clip = "off") +
+                    labs(title= paste(colnames(pheno)[2],"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
                   ggsave(file=paste("./manplots/","manplot_",colnames(pheno)[2],".tiff",sep=""), plot=manplot, width=30, height=dim, units=("in"), dpi=600, compression = "lzw")
                 }
                 if (biparental == TRUE) {
@@ -998,8 +1019,13 @@ multiomicGWAS <- function(
                           panel.border = element_blank(), strip.background = element_blank(), axis.text.x=element_blank(),
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
-                    theme(legend.position = "none") + theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
-                    labs(title= paste(colnames(pheno)[2],"\n",sep=""), size=40)
+                    theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
+                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
+                    scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
+                    coord_cartesian(clip = "off") +
+                    labs(title= paste(colnames(pheno)[2],"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
                   ggsave(file=paste("./manplots/","QTLprofile_",colnames(pheno)[2],".tiff",sep=""), plot=manplot, width=30, height=dim, units=("in"), dpi=600, compression = "lzw")
                 }
               }
@@ -1023,11 +1049,13 @@ multiomicGWAS <- function(
                           panel.border = element_blank(), strip.background = element_blank(), axis.text.x=element_blank(),
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
-                    theme(legend.position = "none") + theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
+                    theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds")) +
-                    labs(title= paste(colnames(pheno)[2],"\n",sep=""), size=40)
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
+                    coord_cartesian(clip = "off") +
+                    labs(title= paste(colnames(pheno)[2],"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
                   ggsave(file=paste("./manplots/","manplot_",colnames(pheno)[2],".tiff",sep=""), plot=manplot, width=30, height=30, units=("in"), dpi=300, compression = "lzw")
                 }
                 if (biparental == TRUE) {
@@ -1050,11 +1078,13 @@ multiomicGWAS <- function(
                           panel.border = element_blank(), strip.background = element_blank(), axis.text.x=element_blank(),
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
-                    theme(legend.position = "none") + theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
+                    theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds")) +
-                    labs(title= paste(colnames(pheno)[2],"\n",sep=""), size=40)
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
+                    coord_cartesian(clip = "off") +
+                    labs(title= paste(colnames(pheno)[2],"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
                   ggsave(file=paste("./manplots/","QTLprofile_",colnames(pheno)[2],".tiff",sep=""), plot=manplot, width=30, height=30, units=("in"), dpi=300, compression = "lzw")
                 }
               }
@@ -1078,11 +1108,13 @@ multiomicGWAS <- function(
                           panel.border = element_blank(), strip.background = element_blank(), axis.text.x=element_blank(),
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
-                    theme(legend.position = "none") + theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
+                    theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds")) +
-                    labs(title= paste(colnames(pheno)[2],"\n",sep=""), size=40)
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
+                    coord_cartesian(clip = "off") +
+                    labs(title= paste(colnames(pheno)[2],"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
                   ggsave(file=paste("./manplots/","manplot_",colnames(pheno)[2],".tiff",sep=""), plot=manplot, width=30, height=40, units=("in"), dpi=300, compression = "lzw")
                 }
                 if (biparental == TRUE) {
@@ -1105,11 +1137,13 @@ multiomicGWAS <- function(
                           panel.border = element_blank(), strip.background = element_blank(), axis.text.x=element_blank(),
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
-                    theme(legend.position = "none") + theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
+                    theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds")) +
-                    labs(title= paste(colnames(pheno)[2],"\n",sep=""), size=40)
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
+                    coord_cartesian(clip = "off") +
+                    labs(title= paste(colnames(pheno)[2],"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
                   ggsave(file=paste("./manplots/","QTLprofile_",colnames(pheno)[2],".tiff",sep=""), plot=manplot, width=30, height=40, units=("in"), dpi=300, compression = "lzw")
                 }
               }
@@ -1133,11 +1167,13 @@ multiomicGWAS <- function(
                           panel.border = element_blank(), strip.background = element_blank(), axis.text.x=element_blank(),
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
-                    theme(legend.position = "none") + theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
+                    theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds")) +
-                    labs(title= paste(colnames(pheno)[2],"\n",sep=""), size=40)
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
+                    coord_cartesian(clip = "off") +
+                    labs(title= paste(colnames(pheno)[2],"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
                   ggsave(file=paste("./manplots/","manplot_",colnames(pheno)[2],".tiff",sep=""), plot=manplot, width=30, height=50, units=("in"), dpi=300, compression = "lzw")
                 }
                 if (biparental == TRUE) {
@@ -1160,11 +1196,13 @@ multiomicGWAS <- function(
                           panel.border = element_blank(), strip.background = element_blank(), axis.text.x=element_blank(),
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
-                    theme(legend.position = "none") + theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
+                    theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds")) +
-                    labs(title= paste(colnames(pheno)[2],"\n",sep=""), size=40)
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
+                    coord_cartesian(clip = "off") +
+                    labs(title= paste(colnames(pheno)[2],"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
                   ggsave(file=paste("./manplots/","QTLprofile_",colnames(pheno)[2],".tiff",sep=""), plot=manplot, width=30, height=50, units=("in"), dpi=300, compression = "lzw")
                 }
               }
