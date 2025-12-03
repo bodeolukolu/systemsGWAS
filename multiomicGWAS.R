@@ -656,8 +656,17 @@ multiomicGWAS <- function(
               colnames(GWAS_scores_effects) <- gsub("^scores\\.", "", colnames(GWAS_scores_effects))
 
               # Calculate PVE
-              # Check for remaining NAs
-              sum(is.na(geno_matrix_imputed))
+              geno_mat_imputed <- apply(geno_mat, 2, function(col) {
+                col[is.na(col)] <- mean(col, na.rm = TRUE)
+                return(col)
+              })
+              geno_mat_imputed <- as.matrix(geno_mat_imputed)
+              # additive PVE
+              if("additive_effects" %in% colnames(GWAS_scores_effects)) {
+                snps <- GWAS_scores_effects$SNP
+                vX <- varX[match(snps, colnames(geno_matrix_imputed))]
+                GWAS_scores_effects$additive_PVE <- pmin((GWAS_scores_effects$additive_effects^2 * vX) / var_y, 1)
+              }
               compute_pve_polyploid <- function(GWAS_scores_effects, geno_matrix_imputed, var_y, ploidy) {
                 max_dom <- ploidy / 2  # maximum dominance level
                 # compute SNP variance (dosage variance)
@@ -678,12 +687,6 @@ multiomicGWAS <- function(
                     vX <- varX[match(snps, colnames(geno_matrix_imputed))]
                     GWAS_scores_effects[[paste0(d,"-dom-ref_PVE")]] <- pmin((GWAS_scores_effects[[ref_col]]^2 * vX) / var_y, 1)
                   }
-                }
-                # additive PVE (optional)
-                if("additive_effects" %in% colnames(GWAS_scores_effects)) {
-                  snps <- GWAS_scores_effects$SNP
-                  vX <- varX[match(snps, colnames(geno_matrix_imputed))]
-                  GWAS_scores_effects$additive_PVE <- pmin((GWAS_scores_effects$additive_effects^2 * vX) / var_y, 1)
                 }
                 return(GWAS_scores_effects)
               }
