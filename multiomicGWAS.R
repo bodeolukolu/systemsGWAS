@@ -657,17 +657,22 @@ multiomicGWAS <- function(
               GWAS_scores_effects$varX <- 2 * GWAS_scores_effects$MAF * (1 - GWAS_scores_effects$MAF) * as.numeric(ploidy)
               # additive
               GWAS_scores_effects$additive_PVE <- (GWAS_scores_effects$additive_effect^2 * GWAS_scores_effects$varX) / var_y
-              for(d in c("1","2","3","4")){
-                alt_col <- paste0(d,"-dom-alt_effect")
-                ref_col <- paste0(d,"-dom-ref_effect")
-                if (alt_col %in% colnames(GWAS_scores_effects)){
-                  GWAS_scores_effects[[paste0(d,"-dom-alt_PVE")]] <- (GWAS_scores_effects[[alt_col]]^2 * GWAS_scores_effects$varX) / var_y
+              # Determine number of dominance levels based on ploidy
+              max_dom <- ploidy / 2
+              for(d in 1:max_dom){
+                alt_col <- paste0(d, "-dom-alt_effect")
+                ref_col <- paste0(d, "-dom-ref_effect")
+                # alt dominance PVE if column exists
+                if (alt_col %in% colnames(GWAS_scores_effects)) {
+                  GWAS_scores_effects[[paste0(d, "-dom-alt_PVE")]] <- (GWAS_scores_effects[[alt_col]]^2 * GWAS_scores_effects$varX) / var_y
                 }
-                if (ref_col %in% colnames(GWAS_scores_effects)){
-                  GWAS_scores_effects[[paste0(d,"-dom-ref_PVE")]] <- (GWAS_scores_effects[[ref_col]]^2 * GWAS_scores_effects$varX) / var_y
+                # ref dominance PVE if column exists
+                if (ref_col %in% colnames(GWAS_scores_effects)) {
+                  GWAS_scores_effects[[paste0(d, "-dom-ref_PVE")]] <- (GWAS_scores_effects[[ref_col]]^2 * GWAS_scores_effects$varX) / var_y
                 }
               }
-              GWAS_scores_effects <- GWAS_scores_effects[ , !(names(GWAS_scores_effects) == "varx")]
+              # Remove varX or varx column safely (case-insensitive)
+              GWAS_scores_effects <- GWAS_scores_effects[ ,!tolower(names(GWAS_scores_effects)) %in% "varx"]
 
               write.table(GWAS_scores_effects, file=paste("./scores_effects/","score_effects_",colnames(pheno)[2],".txt",sep=""), row.names=F, quote = FALSE, sep = "\t")
               colnames(GWAS_logP) <- gsub("_scores", "", colnames(GWAS_logP)); GWAS_logP <- GWAS_logP[,-1]
