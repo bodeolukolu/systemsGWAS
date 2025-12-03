@@ -666,11 +666,11 @@ multiomicGWAS <- function(
                 ref_col <- paste0(d, "-dom-ref_effects")
                 # alt dominance PVE if column exists
                 if (alt_col %in% colnames(GWAS_scores_effects)) {
-                  GWAS_scores_effects[[paste0(d, "-dom-alt_PVE")]] <- (GWAS_scores_effects[[alt_col]]^2 * GWAS_scores_effects$varX) / var_y
+                  GWAS_scores_effects[[paste0(d, "-dom-alt_PVE")]] <- (GWAS_scores_effects[[alt_col]]^2 / var_y
                 }
                 # ref dominance PVE if column exists
                 if (ref_col %in% colnames(GWAS_scores_effects)) {
-                  GWAS_scores_effects[[paste0(d, "-dom-ref_PVE")]] <- (GWAS_scores_effects[[ref_col]]^2 * GWAS_scores_effects$varX) / var_y
+                  GWAS_scores_effects[[paste0(d, "-dom-ref_PVE")]] <- (GWAS_scores_effects[[ref_col]]^2 / var_y
                 }
               }
               # Remove varX or varx column safely (case-insensitive)
@@ -841,6 +841,7 @@ multiomicGWAS <- function(
               colnames(GWAS_scores_effects_long)[1] <- "Marker"
               data_fdr <- set.threshold(GWAS.fitted,method="FDR",level=0.05,n.core=cores)
               SigQTL_fdr <- get.QTL(data_fdr)
+              colnames(SigQTL_fdr) <- gsub("^scores\\.", "", colnames(SigQTL_fdr))
               if (nrow(SigQTL_fdr) > 0) {
                 SigQTL_fdr <- merge(SigQTL_fdr, GWAS_scores_effects_long, by = c("Marker", "Model"))
               }
@@ -852,6 +853,7 @@ multiomicGWAS <- function(
               data_sugg <- set.threshold(GWAS.fitted,method="FDR",level=0.5,n.core=cores)
               data_sugg <- get.QTL(data_sugg)
               data_sugg <- subset(data_sugg, Score >= threshold_suggestive)
+              colnames(data_sugg) <- gsub("^scores\\.", "", colnames(data_sugg))
               if (nrow(data_sugg) > 0) {
                 data_sugg <- merge(data_sugg, GWAS_scores_effects_long, by = c("Marker", "Model"))
               }
@@ -859,6 +861,7 @@ multiomicGWAS <- function(
 
               data_Bonferroni <- set.threshold(GWAS.fitted,method="Bonferroni",level=0.05,n.core=cores)
               SigQTL_Bonferroni <- get.QTL(data_Bonferroni)
+              colnames(SigQTL_Bonferroni) <- gsub("^scores\\.", "", colnames(SigQTL_Bonferroni))
               if (nrow(SigQTL_Bonferroni) > 0) {
                 SigQTL_Bonferroni <- merge(SigQTL_Bonferroni, GWAS_scores_effects_long, by = c("Marker", "Model"))
               }
@@ -877,6 +880,7 @@ multiomicGWAS <- function(
               if (permutations >= 100) {
                 data_permute <- set.threshold(GWAS.fitted,method="permute",n.permute=permutations,level=0.05,n.core=cores)
                 SigQTL_permute <- get.QTL(data_permute)
+                colnames(SigQTL_permute) <- gsub("^scores\\.", "", colnames(SigQTL_permute))
                 if (nrow(SigQTL_permute) > 0) {
                   SigQTL_permute <- merge(SigQTL_permute, GWAS_scores_effects_long, by = c("Marker", "Model"))
                 }
@@ -886,7 +890,9 @@ multiomicGWAS <- function(
                   }}
               }
 
-              scores <- GWAS.fitted@scores[[colnames(pheno[2])]]; scores <- setDT(scores, keep.rownames = TRUE)
+              scores <- GWAS.fitted@scores[[colnames(pheno[2])]]
+              colnames(scores) <- gsub("^scores\\.", "", colnames(scores))
+              scores <- setDT(scores, keep.rownames = TRUE)
               scores$Chrom <- gsub("_.+$", "", scores$rn); scores$bp <- gsub("^.+_", "", scores$rn); scores$rn <- NULL
               scores <- as.data.frame(reshape2::melt(scores, id=c("Chrom","bp"))); colnames(scores) <- c("Chrom","bp","models","scores")
               scores <-na.omit(scores); scores$scores <- as.numeric(as.character(scores$scores)); scores$bp <- as.numeric(as.character(scores$bp))
