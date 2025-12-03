@@ -652,16 +652,18 @@ multiomicGWAS <- function(
               )
               GWAS_scores_effects <- merge(GWAS_scores_effects, geno_maf, by = "SNP")
               var_y <- var(pheno[,2], na.rm = TRUE)
+              colnames(GWAS_scores_effects) <- gsub("^scores\\.", "", colnames(GWAS_scores_effects))
+
               # Calculate PVE
               # compute SNP dosage variance for PVE (polyploid-adjusted)
               GWAS_scores_effects$varX <- 2 * GWAS_scores_effects$MAF * (1 - GWAS_scores_effects$MAF) * as.numeric(ploidy)
               # additive
-              GWAS_scores_effects$additive_PVE <- (GWAS_scores_effects$additive_effect^2 * GWAS_scores_effects$varX) / var_y
+              GWAS_scores_effects$additive_PVE <- (GWAS_scores_effects$additive_effects^2 * GWAS_scores_effects$varX) / var_y
               # Determine number of dominance levels based on ploidy
               max_dom <- ploidy / 2
               for(d in 1:max_dom){
-                alt_col <- paste0(d, "-dom-alt_effect")
-                ref_col <- paste0(d, "-dom-ref_effect")
+                alt_col <- paste0(d, "-dom-alt_effects")
+                ref_col <- paste0(d, "-dom-ref_effects")
                 # alt dominance PVE if column exists
                 if (alt_col %in% colnames(GWAS_scores_effects)) {
                   GWAS_scores_effects[[paste0(d, "-dom-alt_PVE")]] <- (GWAS_scores_effects[[alt_col]]^2 * GWAS_scores_effects$varX) / var_y
