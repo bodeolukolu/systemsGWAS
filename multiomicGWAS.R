@@ -666,11 +666,11 @@ multiomicGWAS <- function(
                 ref_col <- paste0(d, "-dom-ref_effects")
                 # alt dominance PVE if column exists
                 if (alt_col %in% colnames(GWAS_scores_effects)) {
-                  GWAS_scores_effects[[paste0(d, "-dom-alt_PVE")]] <- (GWAS_scores_effects[[alt_col]]^2 / var_y
+                  GWAS_scores_effects[[paste0(d, "-dom-alt_PVE")]] <- (GWAS_scores_effects[[alt_col]]^2 / var_y)
                 }
                 # ref dominance PVE if column exists
                 if (ref_col %in% colnames(GWAS_scores_effects)) {
-                  GWAS_scores_effects[[paste0(d, "-dom-ref_PVE")]] <- (GWAS_scores_effects[[ref_col]]^2 / var_y
+                  GWAS_scores_effects[[paste0(d, "-dom-ref_PVE")]] <- (GWAS_scores_effects[[ref_col]]^2 / var_y)
                 }
               }
               # Remove varX or varx column safely (case-insensitive)
