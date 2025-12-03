@@ -26,23 +26,23 @@ multiomicGWAS <- function(
     metag_data_strains = NULL,
     metag_data_species = NULL
 ) {
-load_packages <- function(pkgs) {
-  for (p in pkgs) {
-    if (!requireNamespace(p, quietly = TRUE)) {
-      install.packages(p, repos = "https://cloud.r-project.org")
+  load_packages <- function(pkgs) {
+    for (p in pkgs) {
+      if (!requireNamespace(p, quietly = TRUE)) {
+        install.packages(p, repos = "https://cloud.r-project.org")
+      }
+      suppressPackageStartupMessages(library(p, character.only = TRUE))
     }
-    suppressPackageStartupMessages(library(p, character.only = TRUE))
   }
-}
 
-# List of required packages
-pkgs <- c("GWASpoly", "qqplotr", "AGHmatrix", "corrplot", "ggcorrplot", "ggplot2",
-  "plyr", "dplyr", "tidyr", "car", "MASS", "Hmisc", "data.table", "stringr",
-  "heatmaply", "ppcor", "zoo", "GGally", "reshape2", "compositions",
-  "sommer", "mice", "qvalue")
+  # List of required packages
+  pkgs <- c("GWASpoly", "qqplotr", "AGHmatrix", "corrplot", "ggcorrplot", "ggplot2",
+            "plyr", "dplyr", "tidyr", "car", "MASS", "Hmisc", "data.table", "stringr",
+            "heatmaply", "ppcor", "zoo", "GGally", "reshape2", "compositions",
+            "sommer", "mice", "qvalue")
 
-# Call it once at the start of your function
-load_packages(pkgs)
+  # Call it once at the start of your function
+  load_packages(pkgs)
 
   #############################################################################################################################################################################
   # Specify parameters
@@ -110,7 +110,7 @@ load_packages(pkgs)
   if (!is.null(trait_names) == (!is.null(taxa_strain) || !is.null(taxa_species))) {
     print("Please provide <trait names> or <taxa names>. YOu can't provide both")
   } else {
-  for (gwas_method in gwas_method) {
+    for (gwas_method in gwas_method) {
       for (ploidy in ploidy_levels) {
         metag <- NULL
         if(covariate == TRUE) {no_covariate <- FALSE}
@@ -178,7 +178,7 @@ load_packages(pkgs)
           }
           geno <- read.table(paste("../",genotype_data,sep=""), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
           geno <- geno %>%
-           distinct(SNP, .keep_all = TRUE)
+            distinct(SNP, .keep_all = TRUE)
           taxa_all_list <- NULL
           if (!is.null(metagenome_data)){
             traits <- metag
@@ -653,27 +653,22 @@ load_packages(pkgs)
               GWAS_scores_effects <- merge(GWAS_scores_effects, geno_maf, by = "SNP")
               var_y <- var(pheno[,2], na.rm = TRUE)
               # Calculate PVE
-              GWAS_scores_effects$additive_PVE <- (GWAS_scores_effects$additive_effect^2) / var_y
-              GWAS_scores_effects$`1-dom-alt_PVE` <- (GWAS_scores_effects$`1-dom-alt_effect`^2) / var_y
-              GWAS_scores_effects$`1-dom-ref_PVE` <- (GWAS_scores_effects$`1-dom-ref_effect`^2) / var_y
-              if (ploidy == 4){
-              GWAS_scores_effects$`2-dom-alt_PVE` <- (GWAS_scores_effects$`2-dom-alt_effect`^2) / var_y
-              GWAS_scores_effects$`2-dom-ref_PVE` <- (GWAS_scores_effects$`2-dom-ref_effect`^2) / var_y
+              # compute SNP dosage variance for PVE (polyploid-adjusted)
+              GWAS_scores_effects$varX <- 2 * GWAS_scores_effects$MAF * (1 - GWAS_scores_effects$MAF) * as.numeric(ploidy)
+              # additive
+              GWAS_scores_effects$additive_PVE <- (GWAS_scores_effects$additive_effect^2 * GWAS_scores_effects$varX) / var_y
+              # dominance levels
+              for(d in c("1","2","3","4")){
+                alt_col <- paste0(d,"-dom-alt_effect")
+                ref_col <- paste0(d,"-dom-ref_effect")
+                if (alt_col %in% colnames(GWAS_scores_effects)){
+                  GWAS_scores_effects[[paste0(d,"-dom-alt_PVE")]] <- (GWAS_scores_effects[[alt_col]]^2 * GWAS_scores_effects$varX) / var_y
+                }
+                if (ref_col %in% colnames(GWAS_scores_effects)){
+                  GWAS_scores_effects[[paste0(d,"-dom-ref_PVE")]] <- (GWAS_scores_effects[[ref_col]]^2 * GWAS_scores_effects$varX) / var_y
+                }
               }
-              if (ploidy == 6){
-                GWAS_scores_effects$`2-dom-alt_PVE` <- (GWAS_scores_effects$`2-dom-alt_effect`^2) / var_y
-                GWAS_scores_effects$`2-dom-ref_PVE` <- (GWAS_scores_effects$`2-dom-ref_effect`^2) / var_y
-                GWAS_scores_effects$`3-dom-alt_PVE` <- (GWAS_scores_effects$`3-dom-alt_effect`^2) / var_y
-                GWAS_scores_effects$`3-dom-ref_PVE` <- (GWAS_scores_effects$`3-dom-ref_effect`^2) / var_y
-              }
-              if (ploidy == 8){
-                GWAS_scores_effects$`2-dom-alt_PVE` <- (GWAS_scores_effects$`2-dom-alt_effect`^2) / var_y
-                GWAS_scores_effects$`2-dom-ref_PVE` <- (GWAS_scores_effects$`2-dom-ref_effect`^2) / var_y
-                GWAS_scores_effects$`3-dom-alt_PVE` <- (GWAS_scores_effects$`3-dom-alt_effect`^2) / var_y
-                GWAS_scores_effects$`3-dom-ref_PVE` <- (GWAS_scores_effects$`3-dom-ref_effect`^2) / var_y
-                GWAS_scores_effects$`4-dom-alt_PVE` <- (GWAS_scores_effects$`3-dom-alt_effect`^2) / var_y
-                GWAS_scores_effects$`4-dom-ref_PVE` <- (GWAS_scores_effects$`3-dom-ref_effect`^2) / var_y
-              }
+              GWAS_scores_effects <- GWAS_scores_effects[ , !(names(GWAS_scores_effects) == "varx")]
 
               write.table(GWAS_scores_effects, file=paste("./scores_effects/","score_effects_",colnames(pheno)[2],".txt",sep=""), row.names=F, quote = FALSE, sep = "\t")
               colnames(GWAS_logP) <- gsub("_scores", "", colnames(GWAS_logP)); GWAS_logP <- GWAS_logP[,-1]
@@ -797,8 +792,8 @@ load_packages(pkgs)
                 pivot_longer(cols = c(additive_PVE, `1-dom-alt_PVE`, `1-dom-alt_PVE`),names_to = "Model",values_to = "PVE"
                 ) %>%
                 mutate(Model = case_when(Model %in% c("additive_PVE", "PVE_additive") ~ "additive",
-                    Model %in% c("1-dom-ralt_PVE", "1-dom-alt_PVE") ~ "1-dom-alt",Model %in% c("1-dom-ref_PVE") ~ "1-dom-ref",
-                    TRUE ~ Model)
+                                         Model %in% c("1-dom-ralt_PVE", "1-dom-alt_PVE") ~ "1-dom-alt",Model %in% c("1-dom-ref_PVE") ~ "1-dom-ref",
+                                         TRUE ~ Model)
                 )
               colnames(GWAS_scores_effects_long)[1] <- "Marker"
               data_fdr <- set.threshold(GWAS.fitted,method="FDR",level=0.05,n.core=cores)
