@@ -663,10 +663,10 @@ multiomicGWAS <- function(
               geno_mat_imputed <- as.matrix(geno_mat_imputed)
               max_dom <- ploidy / 2  # maximum dominance level
               # compute SNP variance (dosage variance)
-              varX <- apply(geno_matrix_imputed, 2, var, na.rm = TRUE)
+              varX <- apply(geno_mat_imputed, 2, var, na.rm = TRUE)
               # compute additive PVE
               snps <- GWAS_scores_effects$SNP
-              vX <- varX[match(snps, colnames(geno_matrix_imputed))]
+              vX <- varX[match(snps, colnames(geno_mat_imputed))]
               GWAS_scores_effects$additive_PVE <- pmin((GWAS_scores_effects$additive_effects^2 * vX) / var_y, 1)
               # compute dominance PVE
               for(d in 1:max_dom){
@@ -676,13 +676,13 @@ multiomicGWAS <- function(
                 if(alt_col %in% colnames(GWAS_scores_effects)) {
                   snps <- GWAS_scores_effects$SNP
                   # use corresponding genotype variance
-                  vX <- varX[match(snps, colnames(geno_matrix_imputed))]
+                  vX <- varX[match(snps, colnames(geno_mat_imputed))]
                   GWAS_scores_effects[[paste0(d,"-dom-alt_PVE")]] <- pmin((GWAS_scores_effects[[alt_col]]^2 * vX) / var_y, 1)
                 }
                 # ref dominance PVE
                 if(ref_col %in% colnames(GWAS_scores_effects)) {
                   snps <- GWAS_scores_effects$SNP
-                  vX <- varX[match(snps, colnames(geno_matrix_imputed))]
+                  vX <- varX[match(snps, colnames(geno_mat_imputed))]
                   GWAS_scores_effects[[paste0(d,"-dom-ref_PVE")]] <- pmin((GWAS_scores_effects[[ref_col]]^2 * vX) / var_y, 1)
                 }
               }
@@ -691,8 +691,8 @@ multiomicGWAS <- function(
               colnames(GWAS_logP) <- gsub("_scores", "", colnames(GWAS_logP)); GWAS_logP <- GWAS_logP[,-1]
               colnames(GWAS_effects) <- gsub("_effects", "", colnames(GWAS_effects)); GWAS_effects <- GWAS_effects[,-1]
 
-              score_models <- colnames(pvalues)
               pvalues <- as.data.frame(10^(-1 * as.data.frame(GWAS_logP)))
+              score_models <- colnames(pvalues)
               if(ncol(pvalues) ==1 ){colnames(pvalues) <- score_models}
               pvalues <- as.data.frame(reshape2::melt(pvalues)); colnames(pvalues) <- c("model","pvalue")
               pvalues <- na.omit(pvalues); pvalues$pvalue <- as.numeric(as.character(pvalues$pvalue))
