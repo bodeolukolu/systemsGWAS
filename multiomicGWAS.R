@@ -970,6 +970,7 @@ multiomicGWAS <- function(
                 if(model == "Add_Dom"){
                   dim=20
                 }
+                scores$models <- factor(scores$models,levels = c("additive", "1-dom-alt", "1-dom-ref"))
                 if (diversity == TRUE) {
                   manplot <- ggplot(scores, aes(x = Chrom_bp, y=scores, group=Chrom)) +
                     geom_line(aes(group=1), lwd=1.0,color="grey20") + geom_point(size=10, pch=20, aes(colour=factor(Chrom)), show.legend = FALSE) + theme(text = element_text(size=40)) +
@@ -1029,6 +1030,7 @@ multiomicGWAS <- function(
                 }
               }
               if (ploidy == 4) {
+                scores$models <- factor(scores$models,levels = c("additive", "1-dom-alt", "1-dom-ref", "2-dom-alt", "2-dom-ref"))
                 if (diversity == TRUE) {
                   manplot <- ggplot(scores, aes(x = Chrom_bp, y=scores, group=Chrom)) +
                     geom_line(lwd=1.0,color="grey20") + geom_point(size=10, pch=20, aes(colour=factor(Chrom)), show.legend = FALSE)+ theme(text = element_text(size=40)) +
@@ -1088,6 +1090,7 @@ multiomicGWAS <- function(
                 }
               }
               if (ploidy == 6) {
+                scores$models <- factor(scores$models,levels = c("additive", "1-dom-alt", "1-dom-ref", "2-dom-alt", "2-dom-ref", "3-dom-alt", "3-dom-ref"))
                 if (diversity == TRUE) {
                   manplot <- ggplot(scores, aes(x = Chrom_bp, y=scores, group=Chrom)) +
                     geom_line(lwd=1.0,color="grey20") + geom_point(size=10, pch=20, aes(colour=factor(Chrom)), show.legend = FALSE)+ theme(text = element_text(size=40)) +
@@ -1147,6 +1150,7 @@ multiomicGWAS <- function(
                 }
               }
               if (ploidy == 8) {
+                scores$models <- factor(scores$models,levels = c("additive", "1-dom-alt", "1-dom-ref", "2-dom-alt", "2-dom-ref", "3-dom-alt", "3-dom-ref", "4-dom-alt", "4-dom-ref"))
                 if (diversity == TRUE) {
                   manplot <- ggplot(scores, aes(x = Chrom_bp, y=scores, group=Chrom)) +
                     geom_line(lwd=1.0,color="grey20") + geom_point(size=10, pch=20, aes(colour=factor(Chrom)), show.legend = FALSE)+ theme(text = element_text(size=40)) +
