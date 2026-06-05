@@ -354,7 +354,7 @@ multiomicGWAS <- function(
 
 
             # Compute correlation coefficients or extract it from pre-computed correlations.
-            if (trait_associated_covariates == TRUE) {
+            if (trait_associated_covariates == TRUE &&  covariate_metag == TRUE) {
               if (grepl(".txt", corr_coeff)) {
                 tcorr <- read.table(paste("../",corr_coeff,sep=""), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
                 tcorr <- subset(tcorr, tcorr[,1]==i)
@@ -502,7 +502,11 @@ multiomicGWAS <- function(
               pheno <- merge(pheno_gwas, pheno, by="Plant_ID")
             }
             write.csv(pheno,'pheno.csv', row.names=F, quote = FALSE)
-            if(!is.null(trait_microbial_proxy)){ write.csv(pheno, paste0(names(traits)[j],"_proxy_pheno.csv"), row.names=F, quote = FALSE)}
+            if(is.null(secondary_trait)){
+              if(!is.null(trait_microbial_proxy)){ write.csv(pheno, paste0(names(traits)[j],"_proxy_pheno.csv"), row.names=F, quote = FALSE)}
+            } else {
+              if(!is.null(trait_microbial_proxy)){ write.csv(pheno, paste0(secondary_trait,"_proxy_pheno.csv"), row.names=F, quote = FALSE)}
+            }
 
             geno <- read.table(paste("../",genotype_data,sep=""), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
             geno <- geno %>%
