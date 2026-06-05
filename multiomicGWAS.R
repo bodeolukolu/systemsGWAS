@@ -494,7 +494,7 @@ multiomicGWAS <- function(
               pheno <- merge(pheno_gwas, pheno, by="Plant_ID")
             }
             write.csv(pheno,'pheno.csv', row.names=F, quote = FALSE)
-            if(!is.null(trait_microbial_proxy){ write.csv(pheno, paste0(names(traits)[j],"_proxy_pheno.csv"), row.names=F, quote = FALSE)}
+            if(!is.null(trait_microbial_proxy)){ write.csv(pheno, paste0(names(traits)[j],"_proxy_pheno.csv"), row.names=F, quote = FALSE)}
 
             geno <- read.table(paste("../",genotype_data,sep=""), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
             geno <- geno %>%
