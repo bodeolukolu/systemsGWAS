@@ -318,13 +318,14 @@ multiomicGWAS <- function(
               if(ncol(pheno) == 1){
                 pheno <- cbind(Plant_ID = rownames(pheno), pheno)
                 rownames(pheno) <- NULL
+                traitname <- (colnames(pheno))[2]
               } else {
                 pca_fit <- prcomp(pheno, center = TRUE, scale. = TRUE)
                 pheno <- as.data.frame(pca_fit$x[, 1])
                 pheno <- cbind(ID = rownames(pheno), pheno)
                 rownames(pheno) <- NULL
                 if (is.numeric(trait_microbial_proxy)){traitname <- paste0(traitname,"_correlated_proxy")} else {
-                  if(is.null(taxa_prefix)){ traitname <- paste0(traitname,"_proxy") } else {traitname <- paste0(traitname,"_",taxa_prefix,"_spp_proxy")
+                  if(is.null(taxa_prefix)){ traitname <- paste0(traitname,"_proxy") } else {traitname <- paste0(traitname,"_",taxa_prefix,"_spp_proxy")}
                 }
                 colnames(pheno) <- c("Plant_ID", traitname)
                 message("PC1 variance explained = ", round(100 * summary(pca_fit)$importance[2,1],2), "%")
@@ -1302,5 +1303,4 @@ multiomicGWAS <- function(
   #   q_value <- as.data.frame(q$qvalues)
   #   p[,paste(i)] <- q_value
   # }
-
 }
