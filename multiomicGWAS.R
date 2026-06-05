@@ -60,7 +60,7 @@ multiomicGWAS <- function(
   file_ploidy_6 <- genofile_6x
   file_ploidy_8 <- genofile_8x
   phenotype_data <- phenofile
-  secondary_trait=secondary_trait,
+  secondary_trait=secondary_trait
   if (is.null(covariate_pheno) || covariate_pheno == "NULL") {
     covariatename <- NULL
   } else {
