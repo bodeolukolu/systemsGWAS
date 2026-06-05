@@ -461,7 +461,7 @@ multiomicGWAS <- function(
             if (covariate == TRUE){pheno <- pheno[,-c(3:5)]}
 
             # Run model with metagenome and generate residual
-            if(metag_method == "Aitchison" && !is.null(metag)) {
+            if(metag_method == "Aitchison" && !is.null(metag) && covariate_metag == TRUE) {
               covariates <- traits[traits$Plant_ID %in% pheno$Plant_ID, ]
               selcov1 <- setdiff(names(covariates),names(traits_pheno))
               selcov2 <- intersect(names(covariates),names(pheno))
@@ -487,6 +487,7 @@ multiomicGWAS <- function(
               pheno <- merge(pheno_gwas, pheno, by="Plant_ID")
             }
             write.csv(pheno,'pheno.csv', row.names=F, quote = FALSE)
+            if(!is.null(trait_microbial_proxy){ write.csv(pheno, paste0(names(traits)[j],"_proxy_pheno.csv"), row.names=F, quote = FALSE)}
 
             geno <- read.table(paste("../",genotype_data,sep=""), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
             geno <- geno %>%
