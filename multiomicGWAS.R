@@ -337,7 +337,7 @@ multiomicGWAS <- function(
               cor_valuePC1 <- cor(pheno_PC1[[2]], pheno_PC1[[3]], method = "spearman", use = "complete.obs")
               if(ncol(pheno) == 1){
                 out_file <- paste0(traitname, "_", trait_microbial_proxy, "_proxy_trait_vs_taxa_", round(cor_valuePC1, 3),".txt")
-              } esle {
+              } else {
                 out_file <- paste0(traitname, "_", trait_microbial_proxy, "_proxy_trait_vs_PC1_", round(cor_valuePC1, 3),"_PC1_",PC1_perc,"perc.txt")
               }
 
