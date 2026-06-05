@@ -5,6 +5,7 @@ multiomicGWAS <- function(
     projname = "GWAS",
     ploidy_levels = c(2,4,6,8),
     trait_names = c("trait1","trait2"),
+    secondary_trait=NULL,
     trait_microbial_proxy=c("0.05"),
     model_effect = c("Add","Dom"),
     fdr = TRUE,
@@ -59,6 +60,7 @@ multiomicGWAS <- function(
   file_ploidy_6 <- genofile_6x
   file_ploidy_8 <- genofile_8x
   phenotype_data <- phenofile
+  secondary_trait=secondary_trait,
   if (is.null(covariate_pheno) || covariate_pheno == "NULL") {
     covariatename <- NULL
   } else {
@@ -269,6 +271,7 @@ multiomicGWAS <- function(
             pheno <- na.omit(pheno)
             pheno_original <- pheno
             traitname <- (colnames(pheno))[2]
+            if(!is.null(secondary_trait)){ traitname <- secondary_trait}
             if (!is.null(trait_microbial_proxy)){
               if (all(grepl("^-?[0-9]+\\.?[0-9]*$", trait_microbial_proxy))) {trait_microbial_proxy <- as.numeric(trait_microbial_proxy)} else {
                 taxa_prefix <- NULL
@@ -298,14 +301,15 @@ multiomicGWAS <- function(
               rownames(metag_proxy) <- sub("^X", "", rownames(metag_proxy))
               metag_proxy <- clr(metag_proxy + 1e-6)  # pseudocount to avoid log(0)
               metag_proxy <- as.data.frame(metag_proxy)
-              row.names(pheno) <- pheno[,1]
-              pheno <- subset(pheno, select=c(-1))
-              metag_proxy <- merge(pheno, metag_proxy, by = 'row.names')
-              rownames(metag_proxy) <- metag_proxy[,1]; metag_proxy <- metag_proxy[,-1]
-              for (k in 1:ncol(metag_proxy)){
-                metag_proxy[,k] <- as.numeric(as.character(metag_proxy[,k]))
+              if(is.null(secondary_trait)){
+                row.names(pheno) <- pheno[,1]
+                pheno <- subset(pheno, select=c(-1))
+                metag_proxy <- merge(pheno, metag_proxy, by = 'row.names')
+                rownames(metag_proxy) <- metag_proxy[,1]; metag_proxy <- metag_proxy[,-1]
+                for (k in 1:ncol(metag_proxy)){
+                  metag_proxy[,k] <- as.numeric(as.character(metag_proxy[,k]))
+                }
               }
-
               if(is.numeric(trait_microbial_proxy)){
                 cor.coef.proxy <- as.data.frame(cor(metag_proxy, use = "pairwise.complete.obs", method = "spearman"))
                 cor.coef.proxy <- subset(cor.coef.proxy, select=c(traitname))

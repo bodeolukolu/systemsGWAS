@@ -22,6 +22,7 @@ multiomicGWAS (
     projname = "GWAS",
     ploidy_levels = c(2,4,6,8),
     trait_names = c("trait1","trait2"),
+    secondary_trait=NULL,       # set to NULL if not available, Fusarium_verticillioides is causal pathogen for Fusarium Ear Rot
     trait_microbial_proxy=c("0.3"),                 # set to NULL if not available. List taxa (and Fusarium_spp or Fusarium spp, to capture multiple taxa starting with Fusarium). To use correlation threshold, list single value
     model_effect = c("Add","Dom"),
     fdr = TRUE,
