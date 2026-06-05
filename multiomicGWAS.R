@@ -162,7 +162,7 @@ multiomicGWAS <- function(
           if("6" %in% ploidy_levels && ploidy == 6){genotype_data <- file_ploidy_6}
           if("8" %in% ploidy_levels && ploidy == 8){genotype_data <- file_ploidy_8}
 
-          if(!is.null(metag)) {trait_associated_covariates <- TRUE} else {trait_associated_covariates <- FALSE}
+          if(!is.null(metag) && covariate_metag == TRUE) {trait_associated_covariates <- TRUE} else {trait_associated_covariates <- FALSE}
           metagenome_data <- NULL
           if(grepl("_strain_",job)) {metagenome_data <- metagenome_data_strains}
           if(grepl("_species_",job)) {metagenome_data <- metagenome_data_species}
@@ -311,6 +311,8 @@ multiomicGWAS <- function(
                 cor.coef.proxy <- subset(cor.coef.proxy, abs(cor.coef.proxy[,1]) >= trait_microbial_proxy)
                 select_proxy_taxa <- rownames(cor.coef.proxy)[!grepl(traitname, rownames(cor.coef.proxy))]
                 pheno <- subset(metag_proxy, select=c(select_proxy_taxa))
+                myCorrtaxalist <- paste0("traitname "."proxy:","\t",select_proxy_taxa)
+                write(myCorrtaxalist, file = "Correlated_proxy_taxa.txt", append = TRUE)
               } else {
                 pheno <- subset(metag_proxy, select=c(trait_microbial_proxy))
               }
