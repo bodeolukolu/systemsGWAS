@@ -267,6 +267,7 @@ multiomicGWAS <- function(
             i <- names(traits)[j]
             pheno <- subset(traits, select=c(1,j))
             pheno <- na.omit(pheno)
+            pheno_original <- pheno
             traitname <- (colnames(pheno))[2]
             if (!is.null(trait_microbial_proxy)){
               if (all(grepl("^-?[0-9]+\\.?[0-9]*$", trait_microbial_proxy))) {trait_microbial_proxy <- as.numeric(trait_microbial_proxy)} else {
@@ -311,8 +312,6 @@ multiomicGWAS <- function(
                 cor.coef.proxy <- subset(cor.coef.proxy, abs(cor.coef.proxy[,1]) >= trait_microbial_proxy)
                 select_proxy_taxa <- rownames(cor.coef.proxy)[!grepl(traitname, rownames(cor.coef.proxy))]
                 pheno <- subset(metag_proxy, select=c(select_proxy_taxa))
-                myCorrtaxalist <- paste(traitname, "proxy:      ", paste(select_proxy_taxa, collapse = ", "), sep = " ")
-                cat(paste0(myCorrtaxalist, "\n"), file = "Correlated_proxy_taxa.txt", append = TRUE)
               } else {
                 pheno <- subset(metag_proxy, select=c(trait_microbial_proxy))
               }
@@ -332,7 +331,12 @@ multiomicGWAS <- function(
                 colnames(pheno) <- c("Plant_ID", traitname)
                 message("PC1 variance explained = ", round(100 * summary(pca_fit)$importance[2,1],2), "%")
               }
+              pheno_PC1 <- merge(pheno_original, pheno, by = "Plant_ID")
+              cor_valuePC1 <- cor(pheno_PC1[[2]], pheno_PC1[[3]], method = "spearman", use = "complete.obs")
+              out_file <- paste0(traitname, "_", trait_microbial_proxy, "_Correlated_proxy_taxa_trait_vs_PC1_", round(cor_valuePC1, 3),".txt")
+              write.table(cor.coef.proxy, file = out_file, sep = "\t", quote = FALSE, row.names = TRUE)
             }
+
 
             # Compute correlation coefficients or extract it from pre-computed correlations.
             if (trait_associated_covariates == TRUE) {
