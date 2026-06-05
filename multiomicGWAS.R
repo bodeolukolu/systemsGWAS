@@ -312,7 +312,7 @@ multiomicGWAS <- function(
                 select_proxy_taxa <- rownames(cor.coef.proxy)[!grepl(traitname, rownames(cor.coef.proxy))]
                 pheno <- subset(metag_proxy, select=c(select_proxy_taxa))
                 myCorrtaxalist <- paste(traitname, "proxy:      ", paste(select_proxy_taxa, collapse = ", "), sep = " ")
-                write(myCorrtaxalist, file = "Correlated_proxy_taxa.txt", quote=FALsE, append = TRUE)
+                cat(paste0(myCorrtaxalist, "\n"), file = "Correlated_proxy_taxa.txt", append = TRUE)
               } else {
                 pheno <- subset(metag_proxy, select=c(trait_microbial_proxy))
               }
