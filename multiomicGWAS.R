@@ -5,6 +5,7 @@ multiomicGWAS <- function(
     projname = "GWAS",
     ploidy_levels = c(2,4,6,8),
     trait_names = c("trait1","trait2"),
+    trait_microbial_proxy=c("0.05"),
     model_effect = c("Add","Dom"),
     fdr = TRUE,
     bonferroni = TRUE,
@@ -62,6 +63,11 @@ multiomicGWAS <- function(
     covariatename <- NULL
   } else {
     covariatename <- unlist(strsplit(covariate_pheno, ","))
+  }
+  if (is.null(trait_microbial_proxy) || trait_microbial_proxy == "NULL") {
+    trait_microbial_proxy <- NULL
+  } else {
+    trait_microbial_proxy <- unlist(strsplit(trait_microbial_proxy, ","))
   }
   covariate <- covariate_metag
   corr_coeff <- if(covariate_metag) "full" else NULL
@@ -147,7 +153,6 @@ multiomicGWAS <- function(
           dir.create("manplots")
           dir.create("normal_distribution")
 
-          # if(is.null(trait_names)) {corr_coeff <- NULL}
           if(grepl("_strain_",job) && !grepl("_pheno_",job)) {taxa_level <- "strain"}
           if(grepl("_species_",job) && !grepl("_pheno_",job)) {taxa_level <- "species"}
           if(grepl("_pheno_",job)) {taxa_level <- "notaxa"}
@@ -250,6 +255,7 @@ multiomicGWAS <- function(
           # Perform Genome-Wide Association Analysis
           ##########################################
           traits <- read.csv("traits.csv", header=T, sep=",", check.names=FALSE,stringsAsFactors=FALSE)
+
           if (!is.null(taxa_level)){
             if(taxa_level == "notaxa") {taxa <- c(trait_names)}
             if(taxa_level == "strain") {taxa <- c(taxa_strain)}
@@ -262,6 +268,68 @@ multiomicGWAS <- function(
             pheno <- subset(traits, select=c(1,j))
             pheno <- na.omit(pheno)
             traitname <- (colnames(pheno))[2]
+            if (!is.null(trait_microbial_proxy)){
+              if (all(grepl("^-?[0-9]+\\.?[0-9]*$", trait_microbial_proxy))) {trait_microbial_proxy <- as.numeric(trait_microbial_proxy)} else {
+                taxa_prefix <- NULL
+                if (length(trait_microbial_proxy) == 1 && grepl("(_spp| spp)$", trait_microbial_proxy)){
+                  taxa_prefix <- sub("(_spp| spp)$", "", trait_microbial_proxy)
+                  trait_microbial_proxy <- metag$species[grepl(paste0("^", taxa_prefix, "(_| )"), metag$species)]
+                }
+              }
+              perc <- as.numeric(perc)
+              if(is.null(metag)){stop("Please provide provide metagenomic data")}
+              metag_proxy <- subset(metag, select=-c(genus,family,order,class,phylum,kingdom,domain))
+              metag_proxy <- subset(metag_proxy, species != "Severe_acute_respiratory_syndrome_related_coronavirus")
+              metag_proxy <- subset(metag_proxy, select=c(ncol(metag_proxy),1:(ncol(metag_proxy)-1)))
+              metag_proxy <- setNames(data.frame(t(metag_proxy[,-1])), metag_proxy[,1])
+              metag_proxy <- data.frame(t(metag_proxy))
+              metag_proxy[is.na(metag_proxy)] <- "0"
+              for (k in 2:ncol(metag_proxy)){
+                metag_proxy[,k] <- as.numeric(as.character(metag_proxy[,k]))
+              }
+              metag_proxy$percent <- (rowSums(metag_proxy[,1:ncol(metag_proxy)] > "0")/ncol(metag_proxy))*100
+              metag_proxy <- subset(metag_proxy, percent >= perc)
+              metag_proxy <- subset(metag_proxy, select=-c(percent))
+              metag_proxy <- data.frame(t(metag_proxy))
+              metag_proxy$percent <- (rowSums(metag_proxy[,1:ncol(metag_proxy)] > "0")/ncol(metag_proxy))*100
+              metag_proxy <- subset(metag_proxy, percent >= perc)
+              metag_proxy <- subset(metag_proxy, select=-c(percent))
+              rownames(metag_proxy) <- sub("^X", "", rownames(metag_proxy))
+              metag_proxy <- clr(metag_proxy + 1e-6)  # pseudocount to avoid log(0)
+              metag_proxy <- as.data.frame(metag_proxy)
+              row.names(pheno) <- pheno[,1]
+              pheno <- subset(pheno, select=c(-1))
+              metag_proxy <- merge(pheno, metag_proxy, by = 'row.names')
+              rownames(metag_proxy) <- metag_proxy[,1]; metag_proxy <- metag_proxy[,-1]
+              for (k in 1:ncol(metag_proxy)){
+                metag_proxy[,k] <- as.numeric(as.character(metag_proxy[,k]))
+              }
+
+              if(is.numeric(trait_microbial_proxy)){
+                cor.coef.proxy <- as.data.frame(cor(metag_proxy, use = "pairwise.complete.obs", method = "spearman"))
+                cor.coef.proxy <- subset(cor.coef.proxy, select=c(traitname))
+                cor.coef.proxy <- subset(cor.coef.proxy, abs(cor.coef.proxy[,1]) >= trait_microbial_proxy)
+                select_proxy_taxa <- rownames(cor.coef.proxy)[!grepl(traitname, rownames(cor.coef.proxy))]
+                pheno <- subset(metag_proxy, select=c(select_proxy_taxa))
+              } else {
+                pheno <- subset(metag_proxy, select=c(trait_microbial_proxy))
+              }
+
+              if(ncol(pheno) == 1){
+                pheno <- cbind(Plant_ID = rownames(pheno), pheno)
+                rownames(pheno) <- NULL
+              } else {
+                pca_fit <- prcomp(pheno, center = TRUE, scale. = TRUE)
+                pheno <- as.data.frame(pca_fit$x[, 1])
+                pheno <- cbind(ID = rownames(pheno), pheno)
+                rownames(pheno) <- NULL
+                if (is.numeric(trait_microbial_proxy)){traitname <- paste0(traitname,"_correlated_proxy")} else {
+                  if(is.null(taxa_prefix)){ traitname <- paste0(traitname,"_proxy") } else {traitname <- paste0(traitname,"_",taxa_prefix,"_spp_proxy")
+                }
+                colnames(pheno) <- c("Plant_ID", traitname)
+                message("PC1 variance explained = ", round(100 * summary(pca_fit)$importance[2,1],2), "%")
+              }
+            }
 
             # Compute correlation coefficients or extract it from pre-computed correlations.
             if (trait_associated_covariates == TRUE) {
@@ -951,9 +1019,9 @@ multiomicGWAS <- function(
 
               # Create a dummy data frame for legend
               legend_df <- data.frame(x = 1:length(c("FDR", "Bonferroni", "Permutation", "Suggestive")),
-                y = 1,  # dummy y, won't affect plot
-                label = c("FDR", "Bonferroni", "Permutation", "Suggestive"),
-                color = c("grey10", "tomato", "green4", "cornflowerblue"))
+                                      y = 1,  # dummy y, won't affect plot
+                                      label = c("FDR", "Bonferroni", "Permutation", "Suggestive"),
+                                      color = c("grey10", "tomato", "green4", "cornflowerblue"))
               if(is.null(threshold_suggestive)) {threshold_suggested <- FALSE} else {threshold_suggested <- TRUE}
               if(permutations <= 1) {threshold_permuted <- FALSE}
               legend_df$value <- c(threshold_FDR, threshold_Bonferroni, threshold_permuted, threshold_suggested)
