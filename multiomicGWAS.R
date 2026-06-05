@@ -329,11 +329,18 @@ multiomicGWAS <- function(
                   if(is.null(taxa_prefix)){ traitname <- paste0(traitname,"_proxy") } else {traitname <- paste0(traitname,"_",taxa_prefix,"_spp_proxy")}
                 }
                 colnames(pheno) <- c("Plant_ID", traitname)
+                PC1_perc <- round(100 * summary(pca_fit)$importance[2,1],2)
+                round(100 * summary(pca_fit)$importance[2,1],2)
                 message("PC1 variance explained = ", round(100 * summary(pca_fit)$importance[2,1],2), "%")
               }
               pheno_PC1 <- merge(pheno_original, pheno, by = "Plant_ID")
               cor_valuePC1 <- cor(pheno_PC1[[2]], pheno_PC1[[3]], method = "spearman", use = "complete.obs")
-              out_file <- paste0(traitname, "_", trait_microbial_proxy, "_Correlated_proxy_taxa_trait_vs_PC1_", round(cor_valuePC1, 3),".txt")
+              if(ncol(pheno) == 1){
+                out_file <- paste0(traitname, "_", trait_microbial_proxy, "_proxy_trait_vs_taxa_", round(cor_valuePC1, 3),".txt")
+              } esle {
+                out_file <- paste0(traitname, "_", trait_microbial_proxy, "_proxy_trait_vs_PC1_", round(cor_valuePC1, 3),"_PC1_",PC1_perc,"perc.txt")
+              }
+
               write.table(cor.coef.proxy, file = out_file, sep = "\t", quote = FALSE, row.names = TRUE)
             }
 
