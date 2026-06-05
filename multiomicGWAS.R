@@ -311,6 +311,10 @@ multiomicGWAS <- function(
                 cor.coef.proxy <- subset(cor.coef.proxy, select=c(traitname))
                 cor.coef.proxy <- subset(cor.coef.proxy, abs(cor.coef.proxy[,1]) >= trait_microbial_proxy)
                 select_proxy_taxa <- rownames(cor.coef.proxy)[!grepl(traitname, rownames(cor.coef.proxy))]
+                if (length(select_proxy_taxa) == 0) {
+                  cat(paste0(traitname, "\tFAILED: no correlated taxa passed threshold\n"), file = paste0(traitname,"_Correlated_proxy_taxa_log.txt"), append = TRUE)
+                  next
+                }
                 pheno <- subset(metag_proxy, select=c(select_proxy_taxa))
               } else {
                 pheno <- subset(metag_proxy, select=c(trait_microbial_proxy))
