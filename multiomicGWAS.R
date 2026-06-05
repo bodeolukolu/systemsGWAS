@@ -324,7 +324,7 @@ multiomicGWAS <- function(
                 pheno <- subset(metag_proxy, select=c(trait_microbial_proxy))
               }
               remove_samples_list <- intersect(traits[,1], row.names(pheno))
-              pheno <- pheno[row.names(pheno) %in% remove_samples_list, 
+              pheno <- pheno[row.names(pheno) %in% remove_samples_list]
 
               if(ncol(pheno) == 1){
                 pheno <- cbind(Plant_ID = rownames(pheno), pheno)
