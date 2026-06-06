@@ -273,12 +273,11 @@ multiomicGWAS <- function(
             traitname <- (colnames(pheno))[2]
             if(!is.null(secondary_trait)){ traitname <- secondary_trait}
             if (!is.null(trait_microbial_proxy)){
-              if (all(grepl("^-?[0-9]+\\.?[0-9]*$", trait_microbial_proxy))) {trait_microbial_proxy <- as.numeric(trait_microbial_proxy)} else {
-                taxa_prefix <- NULL
-                if (length(trait_microbial_proxy) == 1 && grepl("(_spp| spp)$", trait_microbial_proxy)){
-                  taxa_prefix <- sub("(_spp| spp)$", "", trait_microbial_proxy)
-                  trait_microbial_proxy <- metag$species[grepl(paste0("^", taxa_prefix, "(_| )"), metag$species)]
-                }
+              if (all(grepl("^-?[0-9]+\\.?[0-9]*$", trait_microbial_proxy))) {trait_microbial_proxy <- as.numeric(trait_microbial_proxy)}
+              taxa_prefix <- NULL
+              if (length(trait_microbial_proxy) == 1 && grepl("(_spp| spp)$", trait_microbial_proxy)){
+                taxa_prefix <- sub("(_spp| spp)$", "", trait_microbial_proxy)
+                trait_microbial_proxy <- metag$species[grepl(paste0("^", taxa_prefix, "(_| )"), metag$species)]
               }
               perc <- as.numeric(perc)
               if(is.null(metag)){stop("Please provide provide metagenomic data")}
