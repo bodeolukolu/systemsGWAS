@@ -336,7 +336,7 @@ multiomicGWAS <- function(
                 pheno <- cbind(ID = rownames(pheno), pheno)
                 rownames(pheno) <- NULL
                 if (is.numeric(trait_microbial_proxy)){traitname <- paste0(traitname,"_correlated_proxy")} else {
-                  if(is.null(taxa_prefix)){ traitname <- paste0(traitname,"_proxy") } else {traitname <- paste0(traitname,"_",taxa_prefix,"_spp_proxy")}
+                  if(is.null(taxa_prefix)){ traitname <- paste0(names(traits)[j],"_proxy_",traitname) } else {traitname <- paste0(traitname,"_",taxa_prefix,"_spp_proxy")}
                 }
                 colnames(pheno) <- c("Plant_ID", traitname)
                 PC1_perc <- round(100 * summary(pca_fit)$importance[2,1],2)
@@ -348,7 +348,11 @@ multiomicGWAS <- function(
               if(ncol(pheno) == 1){
                 out_file <- paste0(traitname, "_", trait_microbial_proxy, "_proxy_trait_vs_taxa_", round(cor_valuePC1, 3),".txt")
               } else {
-                out_file <- paste0(traitname, "_", trait_microbial_proxy, "_proxy_trait_vs_PC1_", round(cor_valuePC1, 3),"_PC1_",PC1_perc,"perc.txt")
+                if(is.null(taxa_prefix)){
+                  out_file <- paste0(names(traits)[j],"_proxy_",traitname, "_", trait_microbial_proxy, "_proxy_trait_vs_PC1_", round(cor_valuePC1, 3),"_PC1_",PC1_perc,"perc.txt")
+                } else {
+                  out_file <- paste0(traitname, "_", trait_microbial_proxy, "_proxy_trait_vs_PC1_", round(cor_valuePC1, 3),"_PC1_",PC1_perc,"perc.txt")
+                }
               }
 
               write.table(cor.coef.proxy, file = out_file, sep = "\t", quote = FALSE, row.names = TRUE)
