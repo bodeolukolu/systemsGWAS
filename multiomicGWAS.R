@@ -269,10 +269,10 @@ multiomicGWAS <- function(
             i <- names(traits)[j]
             pheno <- subset(traits, select=c(1,j))
             pheno <- na.omit(pheno)
-            pheno_original <- pheno
             traitname <- (colnames(pheno))[2]
             if(!is.null(secondary_trait)){ traitname <- secondary_trait}
             if (!is.null(trait_microbial_proxy)){
+              pheno_original <- pheno
               if (all(grepl("^-?[0-9]+\\.?[0-9]*$", trait_microbial_proxy))) {trait_microbial_proxy <- as.numeric(trait_microbial_proxy)}
               taxa_prefix <- NULL
               if (length(trait_microbial_proxy) == 1 && grepl("(_spp| spp)$", trait_microbial_proxy)){
@@ -290,25 +290,27 @@ multiomicGWAS <- function(
               for (k in 2:ncol(metag_proxy)){
                 metag_proxy[,k] <- as.numeric(as.character(metag_proxy[,k]))
               }
-              metag_proxy$percent <- (rowSums(metag_proxy[,1:ncol(metag_proxy)] > "0")/ncol(metag_proxy))*100
+              rowSums(metag_proxy > 0, na.rm = TRUE)
+              metag_proxy$percent <- (rowSums(metag_proxy > 0, na.rm = TRUE))/ncol(metag_proxy))*100
               metag_proxy <- subset(metag_proxy, percent >= perc)
               metag_proxy <- subset(metag_proxy, select=-c(percent))
               metag_proxy <- data.frame(t(metag_proxy))
-              metag_proxy$percent <- (rowSums(metag_proxy[,1:ncol(metag_proxy)] > "0")/ncol(metag_proxy))*100
+              metag_proxy$percent <- rowSums(metag_proxy > 0, na.rm = TRUE) / ncol(metag_proxy) * 100
               metag_proxy <- subset(metag_proxy, percent >= perc)
               metag_proxy <- subset(metag_proxy, select=-c(percent))
               rownames(metag_proxy) <- sub("^X", "", rownames(metag_proxy))
               metag_proxy <- clr(metag_proxy + 1e-6)  # pseudocount to avoid log(0)
               metag_proxy <- as.data.frame(metag_proxy)
-              if(is.null(secondary_trait)){
-                row.names(pheno) <- pheno[,1]
-                pheno <- subset(pheno, select=c(-1))
-                metag_proxy <- merge(pheno, metag_proxy, by = 'row.names')
-                rownames(metag_proxy) <- metag_proxy[,1]; metag_proxy <- metag_proxy[,-1]
-                for (k in 1:ncol(metag_proxy)){
-                  metag_proxy[,k] <- as.numeric(as.character(metag_proxy[,k]))
-                }
+              row.names(pheno) <- pheno[,1]
+              pheno <- subset(pheno, select=-(Plant_ID))
+
+              metag_proxy <- merge(pheno, metag_proxy, by = 'row.names')
+              rownames(metag_proxy) <- metag_proxy[,1]; metag_proxy <- metag_proxy[,-1]
+              for (k in 1:ncol(metag_proxy)){
+                metag_proxy[,k] <- as.numeric(as.character(metag_proxy[,k]))
               }
+
+              cor.coef.proxy <- "nocorr"
               if(is.numeric(trait_microbial_proxy)){
                 cor.coef.proxy <- as.data.frame(cor(metag_proxy, use = "pairwise.complete.obs", method = "spearman"))
                 cor.coef.proxy <- subset(cor.coef.proxy, select=c(traitname))
@@ -320,10 +322,21 @@ multiomicGWAS <- function(
                 }
                 pheno <- subset(metag_proxy, select=c(select_proxy_taxa))
               } else {
-                pheno <- subset(metag_proxy, select=c(trait_microbial_proxy))
+                missing_taxa <- setdiff(trait_microbial_proxy, colnames(metag_proxy))
+                if(length(missing_taxa) > 0){
+                  stop(
+                    paste(
+                      "The following taxa were not found:",
+                      paste(missing_taxa, collapse=", ")
+                    )
+                  )
+                }
+
+                pheno <- metag_proxy[, trait_microbial_proxy, drop = FALSE]
               }
-              remove_samples_list <- intersect(traits[,1], row.names(pheno))
-              pheno <- pheno[row.names(pheno) %in% remove_samples_list,]
+              shared_samples <- intersect(traits[,1], row.names(pheno))
+              pheno <- pheno[row.names(pheno) %in% shared_samples,]
+              pheno <- pheno[, colnames(pheno) != names(traits)[j], drop = FALSE]
 
               if(ncol(pheno) == 1){
                 pheno <- cbind(Plant_ID = rownames(pheno), pheno)
