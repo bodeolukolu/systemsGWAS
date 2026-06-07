@@ -348,14 +348,11 @@ multiomicGWAS <- function(
                 pheno <- as.data.frame(pca_fit$x[, 1])
                 pheno <- cbind(ID = rownames(pheno), pheno)
                 rownames(pheno) <- NULL
-                if (is.numeric(trait_microbial_proxy)){
-                  traitname <- paste0(traitname,"_correlated_proxy")
+                if (is.numeric(trait_microbial_proxy)){traitname <- paste0(traitname,"_correlated_proxy")}
+                if(is.null(taxa_prefix)){
+                  traitname <- paste0(names(traits)[j],"_proxy_",traitname)
                 } else {
-                  if(is.null(taxa_prefix)){
-                    traitname <- paste0(names(traits)[j],"_proxy_",traitname)
-                  } else {
-                    traitname <- paste0(names(traits)[j],"_",taxa_prefix,"_spp_proxy")
-                  }
+                  traitname <- paste0(names(traits)[j],"_",taxa_prefix,"_spp_proxy")
                 }
                 colnames(pheno) <- c("Plant_ID", traitname)
                 PC1_perc <- round(100 * summary(pca_fit)$importance[2,1],2)
@@ -530,7 +527,7 @@ multiomicGWAS <- function(
             if(is.null(secondary_trait)){
               if(!is.null(trait_microbial_proxy)){ write.csv(pheno, paste0(names(traits)[j],"_proxy_pheno.csv"), row.names=F, quote = FALSE)}
             } else {
-              if(!is.null(trait_microbial_proxy)){ write.csv(pheno, paste0(secondary_trait,"_proxy_pheno.csv"), row.names=F, quote = FALSE)}
+              if(!is.null(trait_microbial_proxy)){ write.csv(pheno, paste0(names(traits)[j],"_",secondary_trait,"_proxy_pheno.csv"), row.names=F, quote = FALSE)}
             }
 
             geno <- read.table(paste("../",genotype_data,sep=""), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
