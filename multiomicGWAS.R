@@ -273,7 +273,7 @@ multiomicGWAS <- function(
             if(!is.null(secondary_trait)){ traitname <- secondary_trait}
             if (!is.null(trait_microbial_proxy)){
               pheno_original <- pheno
-              if (all(grepl("^-?[0-9]+\\.?[0-9]*$", trait_microbial_proxy))) {trait_microbial_proxy <- as.numeric(trait_microbial_proxy)}
+              if (all(grepl("^-?(\\d+|\\d*\\.\\d+)$", trait_microbial_proxy))) {trait_microbial_proxy <- as.numeric(trait_microbial_proxy)}
               taxa_prefix <- NULL
               if (length(trait_microbial_proxy) == 1 && grepl("(_spp| spp)$", trait_microbial_proxy)){
                 taxa_prefix <- sub("(_spp| spp)$", "", trait_microbial_proxy)
@@ -303,12 +303,12 @@ multiomicGWAS <- function(
               metag_proxy <- as.data.frame(metag_proxy)
               row.names(pheno) <- pheno[,1]
               pheno <- subset(pheno, select=-(Plant_ID))
-
               metag_proxy <- merge(pheno, metag_proxy, by = 'row.names')
               rownames(metag_proxy) <- metag_proxy[,1]; metag_proxy <- metag_proxy[,-1]
               for (k in 1:ncol(metag_proxy)){
                 metag_proxy[,k] <- as.numeric(as.character(metag_proxy[,k]))
               }
+              metag_proxy <- as.data.frame(metag_proxy)
 
               cor.coef.proxy <- "nocorr"
               if(is.numeric(trait_microbial_proxy)){
@@ -331,7 +331,6 @@ multiomicGWAS <- function(
                     )
                   )
                 }
-
                 pheno <- metag_proxy[, trait_microbial_proxy, drop = FALSE]
               }
               shared_samples <- intersect(traits[,1], row.names(pheno))
