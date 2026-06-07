@@ -291,11 +291,11 @@ multiomicGWAS <- function(
                 metag_proxy[,k] <- as.numeric(as.character(metag_proxy[,k]))
               }
               rowSums(metag_proxy > 0, na.rm = TRUE)
-              metag_proxy$percent <- (rowSums(metag_proxy > 0, na.rm = TRUE))/ncol(metag_proxy))*100
+              metag_proxy$percent <- (rowSums(metag_proxy > 0, na.rm = TRUE)/ncol(metag_proxy))*100
               metag_proxy <- subset(metag_proxy, percent >= perc)
               metag_proxy <- subset(metag_proxy, select=-c(percent))
               metag_proxy <- data.frame(t(metag_proxy))
-              metag_proxy$percent <- rowSums(metag_proxy > 0, na.rm = TRUE) / ncol(metag_proxy) * 100
+              metag_proxy$percent <- (rowSums(metag_proxy > 0, na.rm = TRUE) / ncol(metag_proxy)) * 100
               metag_proxy <- subset(metag_proxy, percent >= perc)
               metag_proxy <- subset(metag_proxy, select=-c(percent))
               rownames(metag_proxy) <- sub("^X", "", rownames(metag_proxy))
