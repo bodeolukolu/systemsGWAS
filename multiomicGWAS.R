@@ -308,7 +308,7 @@ multiomicGWAS <- function(
                 metag_proxy[,k] <- as.numeric(as.character(metag_proxy[,k]))
               }
 
-              cor.coef.proxy <- "nocorr"
+              cor.coef.proxy <- "NA"
               if(is.numeric(trait_microbial_proxy)){
                 cor.coef.proxy <- as.data.frame(cor(metag_proxy, use = "pairwise.complete.obs", method = "spearman"))
                 cor.coef.proxy <- subset(cor.coef.proxy, select=c(traitname))
@@ -336,6 +336,7 @@ multiomicGWAS <- function(
               pheno <- as.data.frame(pheno)
               pheno <- pheno[, colnames(pheno) != names(traits)[j], drop = FALSE]
 
+              PC1_perc <- "NA"
               if(ncol(pheno) == 1){
                 pheno <- data.frame(Plant_ID = rownames(pheno), pheno, check.names = FALSE)
                 rownames(pheno) <- NULL
