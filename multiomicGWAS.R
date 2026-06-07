@@ -336,6 +336,7 @@ multiomicGWAS <- function(
               }
               shared_samples <- intersect(traits[,1], row.names(pheno))
               pheno <- pheno[row.names(pheno) %in% shared_samples,]
+              pheno <- as.data.frame(pheno)
               pheno <- pheno[, colnames(pheno) != names(traits)[j], drop = FALSE]
 
               if(ncol(pheno) == 1){
