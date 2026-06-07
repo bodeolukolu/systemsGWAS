@@ -290,7 +290,6 @@ multiomicGWAS <- function(
               for (k in 2:ncol(metag_proxy)){
                 metag_proxy[,k] <- as.numeric(as.character(metag_proxy[,k]))
               }
-              rowSums(metag_proxy > 0, na.rm = TRUE)
               metag_proxy$percent <- (rowSums(metag_proxy > 0, na.rm = TRUE)/ncol(metag_proxy))*100
               metag_proxy <- subset(metag_proxy, percent >= perc)
               metag_proxy <- subset(metag_proxy, select=-c(percent))
@@ -333,7 +332,7 @@ multiomicGWAS <- function(
                 pheno <- metag_proxy[, trait_microbial_proxy, drop = FALSE]
               }
               shared_samples <- intersect(traits[,1], row.names(pheno))
-              pheno <- pheno[row.names(pheno) %in% shared_samples,]
+              pheno <- pheno[row.names(pheno) %in% shared_samples, , drop = FALSE]
               pheno <- as.data.frame(pheno)
               pheno <- pheno[, colnames(pheno) != names(traits)[j], drop = FALSE]
 
@@ -354,7 +353,6 @@ multiomicGWAS <- function(
                 }
                 colnames(pheno) <- c("Plant_ID", traitname)
                 PC1_perc <- round(100 * summary(pca_fit)$importance[2,1],2)
-                round(100 * summary(pca_fit)$importance[2,1],2)
                 message("PC1 variance explained = ", round(100 * summary(pca_fit)$importance[2,1],2), "%")
               }
               pheno_PC1 <- merge(pheno_original, pheno, by = "Plant_ID")
