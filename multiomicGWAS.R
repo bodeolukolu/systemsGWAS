@@ -321,8 +321,13 @@ multiomicGWAS <- function(
                 pheno <- subset(metag_proxy, select=c(select_proxy_taxa))
               } else {
                 missing_taxa <- setdiff(trait_microbial_proxy, colnames(metag_proxy))
-                if(length(missing_taxa) > 0){ paste("The following taxa were not found:", paste(missing_taxa, collapse=", "))}
+                if(length(missing_taxa) > 0){
+                  warning(paste("The following taxa were not found:", paste(missing_taxa, collapse = ", ")))
+                }
                 overlapping_taxa <- intersect(trait_microbial_proxy, colnames(metag_proxy))
+                if(length(overlapping_taxa) == 0){
+                  stop("None of the requested taxa were found in metag_proxy")
+                }
                 pheno <- metag_proxy[, overlapping_taxa, drop = FALSE]
               }
               shared_samples <- intersect(traits[,1], row.names(pheno))
