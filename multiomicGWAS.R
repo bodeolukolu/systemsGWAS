@@ -340,7 +340,13 @@ multiomicGWAS <- function(
               if(ncol(pheno) == 1){
                 pheno <- data.frame(Plant_ID = rownames(pheno), pheno, check.names = FALSE)
                 rownames(pheno) <- NULL
-                traitname <- (colnames(pheno))[2]
+                if (is.numeric(trait_microbial_proxy)){traitname <- paste0(traitname,"_correlated_proxy")}
+                if(is.null(taxa_prefix)){
+                  traitname <- paste0(names(traits)[j],"_proxy_",(colnames(pheno))[,2])
+                } else {
+                  traitname <- paste0(names(traits)[j],"_",taxa_prefix,"_spp_proxy")
+                }
+                colnames(pheno) <- c("Plant_ID", traitname)
               } else {
                 pca_fit <- prcomp(pheno, center = TRUE, scale. = TRUE)
                 pheno <- as.data.frame(pca_fit$x[, 1])
