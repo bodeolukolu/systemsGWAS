@@ -369,7 +369,7 @@ multiomicGWAS <- function(
                 if(is.null(taxa_prefix)){
                   out_file <- paste0(names(traits)[j],"_proxy_",traitname, "_", trait_microbial_proxy, "_proxy_trait_vs_PC1_", round(cor_valuePC1, 3),"_PC1_",PC1_perc,"perc.txt")
                 } else {
-                  out_file <- paste0(traitname, "_", trait_microbial_proxy, "_proxy_trait_vs_PC1_", round(cor_valuePC1, 3),"_PC1_",PC1_perc,"perc.txt")
+                  out_file <- paste0(traitname, "_", "_proxy_trait_vs_PC1_", round(cor_valuePC1, 3),"_PC1_",PC1_perc,"perc.txt")
                 }
               }
               if(is.numeric(trait_microbial_proxy)){
