@@ -363,7 +363,7 @@ multiomicGWAS <- function(
               }
               pheno_PC1 <- merge(pheno_original, pheno, by = "Plant_ID")
               cor_valuePC1 <- cor(pheno_PC1[[2]], pheno_PC1[[3]], method = "spearman", use = "complete.obs")
-              if(ncol(pheno) == 2){
+              if(length(trait_microbial_proxy) == 1 && !is.numeric(trait_microbial_proxy)){
                 out_file <- paste0(traitname, "_", trait_microbial_proxy, "_proxy_trait_vs_taxa_", round(cor_valuePC1, 3),".txt")
               } else {
                 if(is.null(taxa_prefix)){
