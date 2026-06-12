@@ -316,12 +316,16 @@ multiomicGWAS <- function(
                 test.keepX <- test.keepX[test.keepX <= ncol(X)]
                 tuned_spls <- mixOmics::tune.spls(X = X, Y = Y, ncomp = 5, test.keepX = test.keepX,
                                         validation = "Mfold", folds = 5, nrepeat = 20, progressBar = TRUE, measure = "R2")
+                cat("Finished tune.spls\n")
                 best_ncomp <- tuned_spls$choice.ncomp$ncomp
+                cat("Finished best_ncomp\n")
                 best_keepX <- sapply(1:best_ncomp, function(i) {
                   x <- tuned_spls$choice.keepX[[paste0("comp", i)]]
                   x[which.min(x)]  # safer selection logic
                 })
+                cat("Finished best_keepX\n")
                 spls_model <- mixOmics::spls(X = X, Y = Y, ncomp = best_ncomp, keepX = best_keepX)
+                cat("Finished spls_model\n")
                 Y_vec <- as.numeric(as.vector(Y[, 1]))
                 for (h in 1:best_ncomp) {
                   comp_scores <- spls_model$variates$X[, h]
@@ -336,6 +340,7 @@ multiomicGWAS <- function(
                     }
                   }
                 }
+                cat("Finished selectVar0\n")
                 pheno <- as.data.frame(spls_model$variates$X)
                 selected_taxa_list <- lapply(seq_len(best_ncomp), function(h) {
                   tmp <- selectVar(spls_model, comp = h)$X$value
@@ -346,6 +351,7 @@ multiomicGWAS <- function(
                     row.names = NULL
                   )
                 })
+                cat("Finished selectVar\n")
                 selected_taxa_weight <- do.call(rbind, selected_taxa_list)
                 select_proxy_taxa <- unique(selected_taxa_weight$proxy_trait)
                 if (length(select_proxy_taxa) == 0) {
