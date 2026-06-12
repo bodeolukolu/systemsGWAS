@@ -5,7 +5,7 @@ multiomicGWAS <- function(
     projname = "GWAS",
     ploidy_levels = c(2,4,6,8),
     trait_names = c("trait1","trait2"),
-    secondary_trait=NULL,
+    alternate_trait=NULL,
     trait_microbial_proxy=c("NULL"),
     model_effect = c("Add","Dom"),
     fdr = TRUE,
@@ -60,7 +60,7 @@ multiomicGWAS <- function(
   file_ploidy_6 <- genofile_6x
   file_ploidy_8 <- genofile_8x
   phenotype_data <- phenofile
-  secondary_trait=secondary_trait
+  alternate_trait=alternate_trait
   if (is.null(covariate_pheno) || covariate_pheno == "NULL") {
     covariatename <- NULL
   } else {
@@ -270,7 +270,7 @@ multiomicGWAS <- function(
             pheno <- subset(traits, select=c(1,j))
             pheno <- na.omit(pheno)
             traitname <- (colnames(pheno))[2]
-            if(!is.null(secondary_trait)){ traitname <- secondary_trait}
+            if(!is.null(alternate_trait)){ train_traitname <- alternate_trait} else {train_traitname <- traitname}
             if (!is.null(trait_microbial_proxy)){
               pheno_original <- pheno
               taxa_prefix <- NULL
@@ -308,10 +308,10 @@ multiomicGWAS <- function(
               }
 
               assoc.proxy <- "NA"
-              if(trait_microbial_proxy == "auto"){
+              if(trait_microbial_proxy[1] == "auto"){
                 set.seed(123)
-                X <- metag_proxy[, colnames(metag_proxy) != names(traits)[j], drop = FALSE]
-                Y <- metag_proxy[, colnames(metag_proxy) == names(traits)[j], drop = FALSE]
+                X <- metag_proxy[, colnames(metag_proxy) != train_traitname , drop = FALSE]
+                Y <- metag_proxy[, colnames(metag_proxy) == train_traitname , drop = FALSE]
                 test.keepX <- c(1,2,3,4,5,10,20,30,40,50,100,200,300,400,500)
                 test.keepX <- test.keepX[test.keepX <= ncol(X)]
                 tuned_spls <- mixOmics::tune.spls(X = X, Y = Y, ncomp = 5, test.keepX = test.keepX,
@@ -329,9 +329,9 @@ multiomicGWAS <- function(
                 }
               }
 
-              if(trait_microbial_proxy == "auto-null"){
+              if(trait_microbial_proxy[1] == "auto-null"){
                 set.seed(234)
-                X <- as.matrix(metag_proxy[, colnames(metag_proxy) != names(traits)[j], drop = FALSE])
+                X <- as.matrix(metag_proxy[, colnames(metag_proxy) != train_traitname , drop = FALSE])
                 pcs <- prcomp(X, center = TRUE, scale. = TRUE)$x[, 1:3, drop = FALSE]
                 R <- matrix(rnorm(9), 3, 3)
                 R <- qr.Q(qr(R))
@@ -356,7 +356,7 @@ multiomicGWAS <- function(
                 }
                 if(length(overlapping_taxa) > 1){
                   X <- metag_proxy[,overlapping_taxa, drop = FALSE]
-                  Y <- metag_proxy[, names(traits)[j], drop = FALSE]
+                  Y <- metag_proxy[, train_traitname , drop = FALSE]
                   spls_model <- spls(X = X, Y = Y, ncomp = 1, keepX = ncol(X))
                   pheno <- data.frame(proxy_trait = spls_model$variates$X[,1])
                   selected_taxa_weight <- as.data.frame(selectVar(spls_model, comp = 1)$X$value)
@@ -367,23 +367,23 @@ multiomicGWAS <- function(
               shared_samples <- intersect(traits[,1], row.names(pheno))
               pheno <- pheno[row.names(pheno) %in% shared_samples, , drop = FALSE]
               pheno <- as.data.frame(pheno)
-              pheno <- pheno[, colnames(pheno) != names(traits)[j], drop = FALSE]
+              pheno <- pheno[, colnames(pheno) != train_traitname , drop = FALSE]
 
               comp1_perc <- "NA"
               if(ncol(pheno) == 1){
                 pheno <- data.frame(Plant_ID = rownames(pheno), pheno, check.names = FALSE)
                 rownames(pheno) <- NULL
-                if (trait_microbial_proxy == "auto"){
-                  traitname <- paste0(names(traits)[j],"_sPLS_proxy_trait")
+                if (trait_microbial_proxy[1] == "auto"){
+                  traitname <- paste0(train_traitname ,"_sPLS_proxy_trait")
                 }
-                if (trait_microbial_proxy == "auto-null"){
-                  traitname <- paste0(names(traits)[j],"_proxy_null_trait")
+                if (trait_microbial_proxy[1] == "auto-null"){
+                  traitname <- paste0(train_traitname ,"_proxy_null_trait")
                 }
                 if(trait_microbial_proxy[1] != "auto" && trait_microbial_proxy[1] != "auto-null"){
                   if(is.null(taxa_prefix)){
-                    traitname <- paste0(names(traits)[j],"_single_proxy_",(colnames(pheno))[2])
+                    traitname <- paste0(train_traitname ,"_single_proxy_",(colnames(pheno))[2])
                   } else {
-                    traitname <- paste0(names(traits)[j],"_",taxa_prefix,"fixed_feature_sPLS_proxy_trait")
+                    traitname <- paste0(train_traitname ,"_",taxa_prefix,"fixed_feature_sPLS_proxy_trait")
                   }
                   colnames(pheno) <- c("Plant_ID", traitname)
                 }
@@ -391,9 +391,9 @@ multiomicGWAS <- function(
               pheno_compPC1 <- merge(pheno_original, pheno, by = "Plant_ID")
               cor_trait_comp1 <- cor(pheno_compPC1[[2]], pheno_compPC1[[3]], method = "spearman", use = "complete.obs")
               if(is.null(taxa_prefix)){
-                out_file <- paste0(names(traits)[j], "_",traitname, "_corr_", round(cor_trait_comp1, 3), ".txt")
+                out_file <- paste0(train_traitname , "_",traitname, "_corr_", round(cor_trait_comp1, 3), ".txt")
               } else {
-                out_file <- paste0(names(traits)[j], "_",taxa_prefix,"_proxy_",traitname, "_corr_", round(cor_trait_comp1, 3), ".txt")
+                out_file <- paste0(train_traitname, "_",taxa_prefix,"_proxy_",traitname, "_corr_", round(cor_trait_comp1, 3), ".txt")
               }
               write.table(selected_taxa_weight, file = out_file, sep = "\t", quote = FALSE, row.names = TRUE)
             }
@@ -548,10 +548,10 @@ multiomicGWAS <- function(
               pheno <- merge(pheno_gwas, pheno, by="Plant_ID")
             }
             write.csv(pheno,'pheno.csv', row.names=F, quote = FALSE)
-            if(is.null(secondary_trait)){
+            if(is.null(alternate_trait)){
               if(!is.null(trait_microbial_proxy)){ write.csv(pheno, paste0(names(traits)[j],"_proxy_pheno.csv"), row.names=F, quote = FALSE)}
             } else {
-              if(!is.null(trait_microbial_proxy)){ write.csv(pheno, paste0(names(traits)[j],"_",secondary_trait,"_proxy_pheno.csv"), row.names=F, quote = FALSE)}
+              if(!is.null(trait_microbial_proxy)){ write.csv(pheno, paste0(names(traits)[j],"_",alternate_trait,"_proxy_pheno.csv"), row.names=F, quote = FALSE)}
             }
 
             geno <- read.table(paste("../",genotype_data,sep=""), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
