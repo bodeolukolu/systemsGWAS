@@ -319,11 +319,32 @@ multiomicGWAS <- function(
                 best_ncomp <- tuned_spls$choice.ncomp$ncomp
                 best_keepX <- sapply(1:best_ncomp, function(i){tuned_spls$choice.keepX[[paste0("comp", i)]][1]})
                 spls_model <- mixOmics::spls(X = X, Y = Y, ncomp = best_ncomp, keepX = best_keepX)
+                Y_vec <- as.numeric(Y[, 1])
+                for (h in 1:best_ncomp) {
+                  comp_scores <- spls_model$variates$X[, h]
+                  r <- cor(comp_scores, Y_vec, use = "complete.obs", method = "spearman")
+                  if (!is.na(r) && r < 0) {
+                    # flip component orientation
+                    spls_model$variates$X[, h] <- -spls_model$variates$X[, h]
+                    spls_model$loadings$X[, h] <- -spls_model$loadings$X[, h]
+                    # also flip Y-side loadings if present
+                    if (!is.null(spls_model$loadings$Y)) {
+                      spls_model$loadings$Y[, h] <- -spls_model$loadings$Y[, h]
+                    }
+                  }
+                }
                 pheno <- as.data.frame(spls_model$variates$X)
-                selected_taxa_weight <- selectVar(spls_model, comp = 1:best_ncomp, block = "X")
-                selected_taxa_weight <- as.data.frame(selected_taxa_weight[["X"]][["value"]])
-                selected_taxa_weight <- as.data.frame(cbind(proxy_trait = rownames(selected_taxa_weight), weight = selected_taxa_weight[,1]))
-                select_proxy_taxa <- rownames(selected_taxa_weight)
+                selected_taxa_list <- lapply(seq_len(best_ncomp), function(h) {
+                  tmp <- selectVar(spls_model, comp = h)$X$value
+                  data.frame(
+                    proxy_trait = rownames(tmp),
+                    weight = tmp[, 1],
+                    comp = h,
+                    row.names = NULL
+                  )
+                })
+                selected_taxa_weight <- do.call(rbind, selected_taxa_list)
+                select_proxy_taxa <- unique(selected_taxa_weight$proxy_trait)
                 if (length(select_proxy_taxa) == 0) {
                   stop(paste0(traitname, "\tFAILED: no associated taxa selected\n"))
                 }
@@ -358,7 +379,15 @@ multiomicGWAS <- function(
                   X <- metag_proxy[,overlapping_taxa, drop = FALSE]
                   Y <- metag_proxy[, train_traitname , drop = FALSE]
                   spls_model <- spls(X = X, Y = Y, ncomp = 1, keepX = ncol(X))
-                  pheno <- data.frame(proxy_trait = spls_model$variates$X[,1])
+                  proxy_trait <- spls_model$variates$X[, 1]
+                  Y_vec <- as.numeric(Y[, 1])
+                  r <- cor(proxy_trait, Y_vec, method = "spearman", = "complete.obs")
+                  if (!is.na(r) && r < 0) {
+                    proxy_trait <- -proxy_trait
+                    spls_model$variates$X[, 1] <- -spls_model$variates$X[, 1]
+                    spls_model$loadings$X[, 1] <- -spls_model$loadings$X[, 1]
+                  }
+                  pheno <- data.frame(proxy_trait = proxy_trait)
                   selected_taxa_weight <- as.data.frame(selectVar(spls_model, comp = 1)$X$value)
                   select_proxy_taxa <- rownames(selected_taxa_weight)
                   selected_taxa_weight <- as.data.frame(cbind(proxy_trait = rownames(selected_taxa_weight), weight = selected_taxa_weight[,1]))
