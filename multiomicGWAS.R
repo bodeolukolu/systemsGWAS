@@ -361,7 +361,7 @@ multiomicGWAS <- function(
                 R <- qr.Q(qr(R))
                 pcs_rot <- pcs %*% R
                 pheno <- data.frame(proxy_null_trait = pcs_rot[, 1])
-                selected_taxa_weight <- as.data.frame(cbind(proxy_trait = full_microbiome, value.var = 0))
+                selected_taxa_weight <- as.data.frame(cbind(proxy_trait = "full_microbiome", value.var = 0))
               }
 
 
@@ -421,7 +421,7 @@ multiomicGWAS <- function(
                   colnames(pheno) <- c("Plant_ID", traitname)
                 }
               }
-              
+
               pheno_compPC1 <- merge(pheno_original, pheno, by = "Plant_ID")
               cor_trait_comp1 <- cor(pheno_compPC1[[2]], pheno_compPC1[[3]], method = "spearman", use = "complete.obs")
               if(is.null(taxa_prefix)){
