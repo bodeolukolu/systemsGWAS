@@ -381,7 +381,7 @@ multiomicGWAS <- function(
                   spls_model <- spls(X = X, Y = Y, ncomp = 1, keepX = ncol(X))
                   proxy_trait <- spls_model$variates$X[, 1]
                   Y_vec <- as.numeric(Y[, 1])
-                  r <- cor(proxy_trait, Y_vec, method = "spearman", = "complete.obs")
+                  r <- cor(proxy_trait, Y_vec, method = "spearman", use = "complete.obs")
                   if (!is.na(r) && r < 0) {
                     proxy_trait <- -proxy_trait
                     spls_model$variates$X[, 1] <- -spls_model$variates$X[, 1]
