@@ -390,17 +390,10 @@ multiomicGWAS <- function(
               }
               pheno_compPC1 <- merge(pheno_original, pheno, by = "Plant_ID")
               cor_trait_comp1 <- cor(pheno_compPC1[[2]], pheno_compPC1[[3]], method = "spearman", use = "complete.obs")
-              if(trait_microbial_proxy == "auto")){
-                out_file <- paste0(names(traits)[j], "_",traitname, "_corr_", round(cor_valuePC1, 3), ".txt")
-              }
-              if(trait_microbial_proxy == "auto-null")){
-                out_file <- paste0(names(traits)[j], "_",traitname, "_corr_", round(cor_valuePC1, 3), ".txt")
-              }
-              if(length(trait_microbial_proxy) == 1 && trait_microbial_proxy != "auto" && is.null(taxa_prefix)){
-                out_file <- paste0(names(traits)[j], "_", traitname, "_corr_", round(cor_trait_comp1, 3), ".txt")
-              }
-              if(!is.null(taxa_prefix)){
-                out_file <- paste0(names(traits)[j], "_",taxa_prefix,"_proxy_",traitname, "_corr_", round(cor_valuePC1, 3), ".txt")
+              if(is.null(taxa_prefix)){
+                out_file <- paste0(names(traits)[j], "_",traitname, "_corr_", round(cor_trait_comp1, 3), ".txt")
+              } else {
+                out_file <- paste0(names(traits)[j], "_",taxa_prefix,"_proxy_",traitname, "_corr_", round(cor_trait_comp1, 3), ".txt")
               }
               write.table(selected_taxa_weight, file = out_file, sep = "\t", quote = FALSE, row.names = TRUE)
             }
