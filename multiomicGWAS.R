@@ -6,7 +6,7 @@ multiomicGWAS <- function(
     ploidy_levels = c(2,4,6,8),
     trait_names = c("trait1","trait2"),
     secondary_trait=NULL,
-    trait_microbial_proxy=c("0.05"),
+    trait_microbial_proxy=c("NULL"),
     model_effect = c("Add","Dom"),
     fdr = TRUE,
     bonferroni = TRUE,
@@ -41,7 +41,7 @@ multiomicGWAS <- function(
   pkgs <- c("GWASpoly", "qqplotr", "AGHmatrix", "corrplot", "ggcorrplot", "ggplot2",
             "plyr", "dplyr", "tidyr", "car", "MASS", "Hmisc", "data.table", "stringr",
             "heatmaply", "ppcor", "zoo", "GGally", "reshape2", "compositions",
-            "sommer", "mice", "qvalue")
+            "sommer", "mice", "qvalue", "mixOmics")
 
   # Call it once at the start of your function
   load_packages(pkgs)
@@ -273,7 +273,6 @@ multiomicGWAS <- function(
             if(!is.null(secondary_trait)){ traitname <- secondary_trait}
             if (!is.null(trait_microbial_proxy)){
               pheno_original <- pheno
-              if (all(grepl("^-?(\\d+|\\d*\\.\\d+)$", trait_microbial_proxy))) {trait_microbial_proxy <- as.numeric(trait_microbial_proxy)}
               taxa_prefix <- NULL
               if (length(trait_microbial_proxy) == 1 && grepl("(_spp| spp)$", trait_microbial_proxy)){
                 taxa_prefix <- sub("(_spp| spp)$", "", trait_microbial_proxy)
@@ -308,71 +307,102 @@ multiomicGWAS <- function(
                 metag_proxy[,k] <- as.numeric(as.character(metag_proxy[,k]))
               }
 
-              cor.coef.proxy <- "NA"
-              if(is.numeric(trait_microbial_proxy)){
-                cor.coef.proxy <- as.data.frame(cor(metag_proxy, use = "pairwise.complete.obs", method = "spearman"))
-                cor.coef.proxy <- subset(cor.coef.proxy, select=c(traitname))
-                cor.coef.proxy <- subset(cor.coef.proxy, abs(cor.coef.proxy[,1]) >= trait_microbial_proxy)
-                select_proxy_taxa <- rownames(cor.coef.proxy)[!grepl(traitname, rownames(cor.coef.proxy))]
+              assoc.proxy <- "NA"
+              if(trait_microbial_proxy == "auto"){
+                set.seed(123)
+                X <- metag_proxy[, colnames(metag_proxy) != names(traits)[j], drop = FALSE]
+                Y <- metag_proxy[, colnames(metag_proxy) == names(traits)[j], drop = FALSE]
+                test.keepX <- c(1,2,3,4,5,10,20,30,40,50,100,200,300,400,500)
+                test.keepX <- test.keepX[test.keepX <= ncol(X)]
+                tuned_spls <- mixOmics::tune.spls(X = X, Y = Y, ncomp = 5, test.keepX = test.keepX,
+                                        validation = "Mfold", folds = 5, nrepeat = 50, progressBar = TRUE, measure = "R2")
+                best_ncomp <- tuned_spls$choice.ncomp$ncomp
+                best_keepX <- sapply(1:best_ncomp, function(i){tuned_spls$choice.keepX[[paste0("comp", i)]][1]})
+                spls_model <- mixOmics::spls(X = X, Y = Y, ncomp = best_ncomp, keepX = best_keepX)
+                pheno <- as.data.frame(spls_model$variates$X)
+                selected_taxa_weight <- selectVar(spls_model, comp = 1:best_ncomp, block = "X")
+                selected_taxa_weight <- as.data.frame(selected_taxa_weight[["X"]][["value"]])
+                selected_taxa_weight <- as.data.frame(cbind(proxy_trait = rownames(selected_taxa_weight), weight = selected_taxa_weight[,1]))
+                select_proxy_taxa <- rownames(selected_taxa_weight)
                 if (length(select_proxy_taxa) == 0) {
-                  cat(paste0(traitname, "\tFAILED: no correlated taxa passed threshold\n"), file = paste0(traitname,"_Correlated_proxy_taxa_log.txt"), append = TRUE)
-                  next
+                  stop(paste0(traitname, "\tFAILED: no associated taxa selected\n"))
                 }
-                pheno <- subset(metag_proxy, select=c(select_proxy_taxa))
-              } else {
+              }
+
+              if(trait_microbial_proxy == "auto-null"){
+                set.seed(234)
+                X <- as.matrix(metag_proxy[, colnames(metag_proxy) != names(traits)[j], drop = FALSE])
+                pcs <- prcomp(X, center = TRUE, scale. = TRUE)$x[, 1:3, drop = FALSE]
+                R <- matrix(rnorm(9), 3, 3)
+                R <- qr.Q(qr(R))
+                pcs_rot <- pcs %*% R
+                pheno <- data.frame(proxy_null_trait = pcs_rot[, 1])
+                selected_taxa_weight <- as.data.frame(cbind(proxy_trait = full_microbiome, value.var = 0))
+              }
+
+
+              if(trait_microbial_proxy[1] != "auto" && trait_microbial_proxy[1] != "auto-null"){
                 missing_taxa <- setdiff(trait_microbial_proxy, colnames(metag_proxy))
                 if(length(missing_taxa) > 0){
                   warning(paste("The following taxa were not found:", paste(missing_taxa, collapse = ", ")))
                 }
                 overlapping_taxa <- intersect(trait_microbial_proxy, colnames(metag_proxy))
                 if(length(overlapping_taxa) == 0){
-                  stop("None of the requested taxa were found in metag_proxy")
+                  stop("None of the pre-listed taxa were found in metag_proxy")
                 }
-                pheno <- metag_proxy[, overlapping_taxa, drop = FALSE]
+                if(length(overlapping_taxa) == 1){
+                  pheno <- metag_proxy[, overlapping_taxa, drop = FALSE]
+                  selected_taxa_weight <- as.data.frame(cbind(proxy_trait = overlapping_taxa, value.var = 1))
+                }
+                if(length(overlapping_taxa) > 1){
+                  X <- metag_proxy[,overlapping_taxa, drop = FALSE]
+                  Y <- metag_proxy[, names(traits)[j], drop = FALSE]
+                  spls_model <- spls(X = X, Y = Y, ncomp = 1, keepX = ncol(X))
+                  pheno <- data.frame(proxy_trait = spls_model$variates$X[,1])
+                  selected_taxa_weight <- as.data.frame(selectVar(spls_model, comp = 1)$X$value)
+                  select_proxy_taxa <- rownames(selected_taxa_weight)
+                  selected_taxa_weight <- as.data.frame(cbind(proxy_trait = rownames(selected_taxa_weight), weight = selected_taxa_weight[,1]))
+                }
               }
               shared_samples <- intersect(traits[,1], row.names(pheno))
               pheno <- pheno[row.names(pheno) %in% shared_samples, , drop = FALSE]
               pheno <- as.data.frame(pheno)
               pheno <- pheno[, colnames(pheno) != names(traits)[j], drop = FALSE]
 
-              PC1_perc <- "NA"
+              comp1_perc <- "NA"
               if(ncol(pheno) == 1){
                 pheno <- data.frame(Plant_ID = rownames(pheno), pheno, check.names = FALSE)
                 rownames(pheno) <- NULL
-                if (is.numeric(trait_microbial_proxy)){traitname <- paste0(traitname,"_correlated_proxy")}
-                if(is.null(taxa_prefix)){
-                  traitname <- paste0(names(traits)[j],"_proxy_",(colnames(pheno))[2])
-                } else {
-                  traitname <- paste0(names(traits)[j],"_",taxa_prefix,"_spp_proxy")
+                if (trait_microbial_proxy == "auto"){
+                  traitname <- paste0(names(traits)[j],"_sPLS_proxy_trait")
                 }
-                colnames(pheno) <- c("Plant_ID", traitname)
-              } else {
-                pca_fit <- prcomp(pheno, center = TRUE, scale. = TRUE)
-                pheno <- as.data.frame(pca_fit$x[, 1])
-                pheno <- cbind(ID = rownames(pheno), pheno)
-                rownames(pheno) <- NULL
-                if (is.numeric(trait_microbial_proxy)){traitname <- paste0(traitname,"_correlated_proxy")}
-                if(is.null(taxa_prefix)){
-                  traitname <- paste0(names(traits)[j],"_proxy_",traitname)
-                } else {
-                  traitname <- paste0(names(traits)[j],"_",taxa_prefix,"_spp_proxy")
+                if (trait_microbial_proxy == "auto-null"){
+                  traitname <- paste0(names(traits)[j],"_proxy_null_trait")
                 }
-                colnames(pheno) <- c("Plant_ID", traitname)
-                PC1_perc <- round(100 * summary(pca_fit)$importance[2,1],2)
-                message("PC1 variance explained = ", round(100 * summary(pca_fit)$importance[2,1],2), "%")
-              }
-              pheno_PC1 <- merge(pheno_original, pheno, by = "Plant_ID")
-              cor_valuePC1 <- cor(pheno_PC1[[2]], pheno_PC1[[3]], method = "spearman", use = "complete.obs")
-              if(length(trait_microbial_proxy) == 1 && !is.numeric(trait_microbial_proxy)){
-                out_file <- paste0(traitname, "_", trait_microbial_proxy, "_proxy_trait_vs_taxa_", round(cor_valuePC1, 3),".txt")
-              } else {
-                if(is.null(taxa_prefix)){
-                  out_file <- paste0(names(traits)[j],"_proxy_",traitname, "_", trait_microbial_proxy, "_proxy_trait_vs_PC1_", round(cor_valuePC1, 3),"_PC1_",PC1_perc,"perc.txt")
-                } else {
-                  out_file <- paste0(traitname, "_", "_proxy_trait_vs_PC1_", round(cor_valuePC1, 3),"_PC1_",PC1_perc,"perc.txt")
+                if(trait_microbial_proxy[1] != "auto" && trait_microbial_proxy[1] != "auto-null"){
+                  if(is.null(taxa_prefix)){
+                    traitname <- paste0(names(traits)[j],"_single_proxy_",(colnames(pheno))[2])
+                  } else {
+                    traitname <- paste0(names(traits)[j],"_",taxa_prefix,"fixed_feature_sPLS_proxy_trait")
+                  }
+                  colnames(pheno) <- c("Plant_ID", traitname)
                 }
               }
-              write.table(cor.coef.proxy, file = out_file, sep = "\t", quote = FALSE, row.names = TRUE)
+              pheno_compPC1 <- merge(pheno_original, pheno, by = "Plant_ID")
+              cor_trait_comp1 <- cor(pheno_compPC1[[2]], pheno_compPC1[[3]], method = "spearman", use = "complete.obs")
+              if(trait_microbial_proxy == "auto")){
+                out_file <- paste0(names(traits)[j], "_",traitname, "_corr_", round(cor_valuePC1, 3), ".txt")
+              }
+              if(trait_microbial_proxy == "auto-null")){
+                out_file <- paste0(names(traits)[j], "_",traitname, "_corr_", round(cor_valuePC1, 3), ".txt")
+              }
+              if(length(trait_microbial_proxy) == 1 && trait_microbial_proxy != "auto" && is.null(taxa_prefix)){
+                out_file <- paste0(names(traits)[j], "_", traitname, "_corr_", round(cor_trait_comp1, 3), ".txt")
+              }
+              if(!is.null(taxa_prefix)){
+                out_file <- paste0(names(traits)[j], "_",taxa_prefix,"_proxy_",traitname, "_corr_", round(cor_valuePC1, 3), ".txt")
+              }
+              write.table(selected_taxa_weight, file = out_file, sep = "\t", quote = FALSE, row.names = TRUE)
             }
 
 
