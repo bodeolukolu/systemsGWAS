@@ -400,6 +400,7 @@ multiomicGWAS <- function(
               pheno <- pheno[row.names(pheno) %in% shared_samples, , drop = FALSE]
               pheno <- as.data.frame(pheno)
               pheno <- pheno[, colnames(pheno) != train_traitname , drop = FALSE]
+              head(pheno)
 
               comp1_perc <- "NA"
               if(ncol(pheno) == 1){
@@ -420,7 +421,7 @@ multiomicGWAS <- function(
                   colnames(pheno) <- c("Plant_ID", traitname)
                 }
               }
-              head(pheno)
+              
               pheno_compPC1 <- merge(pheno_original, pheno, by = "Plant_ID")
               cor_trait_comp1 <- cor(pheno_compPC1[[2]], pheno_compPC1[[3]], method = "spearman", use = "complete.obs")
               if(is.null(taxa_prefix)){
