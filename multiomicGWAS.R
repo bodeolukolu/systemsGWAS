@@ -314,13 +314,8 @@ multiomicGWAS <- function(
                 Y <- metag_proxy[, colnames(metag_proxy) == train_traitname , drop = FALSE]
                 test.keepX <- c(1,2,3,4,5,10,20,30,40,50,100,200,300,400,500)
                 test.keepX <- test.keepX[test.keepX <= ncol(X)]
-                for(i in 1:10){
-                  cat("\nRun", i, "\n")
-                  try (
-                  tuned_spls <- mixOmics::tune.spls(X = X, Y = Y, ncomp = 5, test.keepX = test.keepX, BPPARAM = BiocParallel::SerialParam(),
-                                          seed = 123, validation = "Mfold", folds = 5, nrepeat = 20, progressBar = TRUE, measure = "R2")
-                  )
-                }
+                tuned_spls <- mixOmics::tune.spls(X = X, Y = Y, ncomp = 5, test.keepX = test.keepX, BPPARAM = BiocParallel::SerialParam(),
+                                        seed = 123, validation = "Mfold", folds = 5, nrepeat = 20, progressBar = TRUE, measure = "R2")
                 best_ncomp <- tuned_spls$choice.ncomp$ncomp
                 best_keepX <- sapply(1:best_ncomp, function(i) {
                   x <- tuned_spls$choice.keepX[[paste0("comp", i)]]
