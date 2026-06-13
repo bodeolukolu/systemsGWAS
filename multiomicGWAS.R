@@ -368,7 +368,7 @@ multiomicGWAS <- function(
                 taxa_frequency <- sort(table(taxa_df$taxa), decreasing = TRUE)
                 taxa_freq_df <- data.frame(taxa = names(taxa_frequency), frequency = as.numeric(taxa_frequency))
                 taxa_freq_df$percent_selected <- 100 * taxa_freq_df$frequency / best_ncomp
-                freq_threshold <- 0.5 * best_ncomp   # appears in ≥50% of components
+                freq_threshold <- 0.7 * best_ncomp   # appears in ≥50% of components
                 select_proxy_taxa <- taxa_freq_df$taxa[taxa_freq_df$frequency >= freq_threshold]
                 cat(select_proxy_taxa)
                 if(length(select_proxy_taxa) == 0){stop(paste0(train_traitname, "\tFAILED: no stable taxa selected\n"))}
