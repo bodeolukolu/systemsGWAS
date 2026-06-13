@@ -309,242 +309,67 @@ multiomicGWAS <- function(
 
               assoc.proxy <- "NA"
               if(trait_microbial_proxy[1] == "auto"){
+                set.seed(123)
+                X <- metag_proxy[, colnames(metag_proxy) != train_traitname, drop = FALSE]
+                Y <- metag_proxy[, train_traitname, drop = FALSE]
+                test.keepX <- c(1,2,3,4,5,10,20,30,40,50,100,200,300,400,500)
+                test.keepX <- test.keepX[test.keepX <= ncol(X)]
+                max_ncomp <- min(5, ncol(X))
+                folds <- sample(rep(1:5, length.out = nrow(X)))
+                tuning_results <- list()
+                for(ncomp in 1:max_ncomp){
+                  for(k in test.keepX){
+                    cv_cor <- c()
+                    for(f in sort(unique(folds))){
+                      train_idx <- folds != f
+                      test_idx  <- folds == f
+                      fit <- try(mixOmics::spls(
+                          X = X[train_idx, , drop = FALSE],
+                          Y = Y[train_idx, , drop = FALSE],
+                          ncomp = ncomp,
+                          keepX = rep(k, ncomp)),silent = TRUE)
+                      if(inherits(fit, "try-error"))
+                        next
+                      pred <- try(predict(fit, X[test_idx, , drop = FALSE])$predict[, , ncomp],silent = TRUE)
+                      if(inherits(pred, "try-error"))
+                        next
+                      pred <- as.numeric(pred)
+                      obs <- as.numeric(Y[test_idx, 1])
+                      r <- suppressWarnings(cor(pred, obs, method = "spearman", use = "complete.obs"))
+                      cv_cor <- c(cv_cor, r)
+                    }
+                    tuning_results[[length(tuning_results)+1]] <- data.frame(ncomp = ncomp, keepX = k,CV_R = mean(cv_cor, na.rm = TRUE))
+                  }
+                }
+                tuning_results <- do.call(rbind, tuning_results)
+                best_row <- tuning_results[which.max(tuning_results$CV_R),]
+                best_ncomp <- best_row$ncomp
+                best_keepX <- rep(best_row$keepX, best_ncomp)
+                cat("\nSelected:", "ncomp =", best_ncomp, "keepX =", best_row$keepX, "CV_R =", round(best_row$CV_R, 3), "\n")
 
-  set.seed(123)
+                spls_model <- mixOmics::spls(X = X, Y = Y, ncomp = best_ncomp, keepX = best_keepX)
+                Y_vec <- as.numeric(Y[,1])
+                for(h in seq_len(best_ncomp)){
+                  r <- cor(spls_model$variates$X[,h], Y_vec, method = "spearman", use = "complete.obs")
+                  if(!is.na(r) && r < 0){
+                    spls_model$variates$X[,h] <- -spls_model$variates$X[,h]
+                    spls_model$loadings$X[,h] <- -spls_model$loadings$X[,h]
+                    if(!is.null(spls_model$loadings$Y))
+                      spls_model$loadings$Y[,h] <- -spls_model$loadings$Y[,h]
+                  }
+                }
+                pheno <- as.data.frame(spls_model$variates$X)
+                selected_taxa_list <- lapply(seq_len(best_ncomp),
+                  function(h){tmp <- selectVar(spls_model,comp = h)$X$value
+                    data.frame(proxy_trait = rownames(tmp), weight = tmp[,1], comp = h,row.names = NULL
+                    )
+                  }
+                )
+                selected_taxa_weight <- do.call(rbind, selected_taxa_list)
+                select_proxy_taxa <- unique(selected_taxa_weight$proxy_trait)
 
-  ############################################################
-  # DATA
-  ############################################################
-
-  X <- metag_proxy[, colnames(metag_proxy) != train_traitname, drop = FALSE]
-  Y <- metag_proxy[, train_traitname, drop = FALSE]
-
-  test.keepX <- c(1,2,3,4,5,10,20,30,40,50,100,200,300,400,500)
-  test.keepX <- test.keepX[test.keepX <= ncol(X)]
-
-  max_ncomp <- min(5, ncol(X))
-
-  ############################################################
-  # FIXED FOLDS
-  ############################################################
-
-  folds <- sample(rep(1:5, length.out = nrow(X)))
-
-  ############################################################
-  # MANUAL TUNING
-  ############################################################
-
-  tuning_results <- list()
-
-  for(ncomp in seq_len(max_ncomp)){
-
-    for(k in test.keepX){
-
-      cv_cor <- c()
-
-      for(f in sort(unique(folds))){
-
-        train_idx <- folds != f
-        test_idx  <- folds == f
-
-        k_use <- min(
-          k,
-          ncol(X[train_idx, , drop = FALSE])
-        )
-
-        fit <- try(
-          mixOmics::spls(
-            X = X[train_idx, , drop = FALSE],
-            Y = Y[train_idx, , drop = FALSE],
-            ncomp = ncomp,
-            keepX = rep(k_use, ncomp)
-          ),
-          silent = TRUE
-        )
-
-        if(inherits(fit, "try-error"))
-          next
-
-        pred <- try({
-
-          pred_obj <- predict(
-            fit,
-            X[test_idx, , drop = FALSE]
-          )
-
-          as.numeric(
-            pred_obj$predict[, , ncomp]
-          )
-
-        }, silent = TRUE)
-
-        if(inherits(pred, "try-error"))
-          next
-
-        obs <- as.numeric(Y[test_idx, 1])
-
-        r <- suppressWarnings(
-          cor(
-            pred,
-            obs,
-            method = "spearman",
-            use = "complete.obs"
-          )
-        )
-
-        if(is.finite(r))
-          cv_cor <- c(cv_cor, r)
-      }
-
-      tuning_results[[length(tuning_results) + 1]] <-
-        data.frame(
-          ncomp = ncomp,
-          keepX = k,
-          CV_R = mean(cv_cor, na.rm = TRUE)
-        )
-    }
-  }
-
-  ############################################################
-  # COMBINE RESULTS
-  ############################################################
-
-  tuning_results <- do.call(
-    rbind,
-    tuning_results
-  )
-
-  tuning_results <- tuning_results[
-    is.finite(tuning_results$CV_R),
-    ,
-    drop = FALSE
-  ]
-
-  if(nrow(tuning_results) == 0){
-    stop("All sPLS tuning combinations failed")
-  }
-
-  ############################################################
-  # BEST MODEL
-  ############################################################
-
-  best_row <- tuning_results[
-    which.max(tuning_results$CV_R),
-    ,
-    drop = FALSE
-  ]
-
-  best_ncomp <- best_row$ncomp
-  best_keepX <- rep(
-    best_row$keepX,
-    best_ncomp
-  )
-
-  cat(
-    "\nSelected:",
-    "ncomp =", best_ncomp,
-    "keepX =", best_row$keepX,
-    "CV_R =", round(best_row$CV_R, 3),
-    "\n"
-  )
-
-  ############################################################
-  # FINAL MODEL
-  ############################################################
-
-  spls_model <- mixOmics::spls(
-    X = X,
-    Y = Y,
-    ncomp = best_ncomp,
-    keepX = best_keepX
-  )
-
-  ############################################################
-  # ORIENT COMPONENTS
-  ############################################################
-
-  Y_vec <- as.numeric(Y[,1])
-
-  for(h in seq_len(best_ncomp)){
-
-    r <- suppressWarnings(
-      cor(
-        spls_model$variates$X[,h],
-        Y_vec,
-        method = "spearman",
-        use = "complete.obs"
-      )
-    )
-
-    if(!is.na(r) && r < 0){
-
-      spls_model$variates$X[,h] <-
-        -spls_model$variates$X[,h]
-
-      spls_model$loadings$X[,h] <-
-        -spls_model$loadings$X[,h]
-    }
-  }
-
-  ############################################################
-  # PROXY TRAITS
-  ############################################################
-
-  pheno <- as.data.frame(
-    spls_model$variates$X
-  )
-
-  ############################################################
-  # TAXA WEIGHTS
-  ############################################################
-
-  selected_taxa_list <- lapply(
-    seq_len(best_ncomp),
-    function(h){
-
-      tmp <- selectVar(
-        spls_model,
-        comp = h
-      )$X$value
-
-      data.frame(
-        proxy_trait = rownames(tmp),
-        weight = tmp[,1],
-        comp = h,
-        row.names = NULL
-      )
-    }
-  )
-
-  selected_taxa_weight <- do.call(
-    rbind,
-    selected_taxa_list
-  )
-
-  select_proxy_taxa <- unique(
-    selected_taxa_weight$proxy_trait
-  )
-
-  if(length(select_proxy_taxa) == 0){
-
-    stop(
-      paste0(
-        train_traitname,
-        "\tFAILED: no associated taxa selected\n"
-      )
-    )
-  }
-
-  ############################################################
-  # OPTIONAL: SAVE TUNING TABLE
-  ############################################################
-
-  tuning_results <- tuning_results[
-    order(-tuning_results$CV_R),
-  ]
-
-  tuning_summary <- tuning_results
-}
+                if(length(select_proxy_taxa) == 0){stop(paste0(train_traitname, "\tFAILED: no associated taxa selected\n"))}
+              }
 
               if(trait_microbial_proxy[1] == "auto-null"){
                 set.seed(234)
