@@ -346,7 +346,6 @@ multiomicGWAS <- function(
                 best_ncomp <- best_row$ncomp
                 best_keepX <- rep(best_row$keepX, best_ncomp)
                 cat("\nSelected:", "ncomp =", best_ncomp, ", keepX =", best_row$keepX, ", CV_R =", round(best_row$CV_R, 3), "\n")
-
                 spls_model <- mixOmics::spls(X = X, Y = Y, ncomp = best_ncomp, keepX = best_keepX)
                 Y_vec <- as.numeric(as.matrix(Y)[,1])
                 for(h in seq_len(best_ncomp)){
@@ -356,21 +355,41 @@ multiomicGWAS <- function(
                     spls_model$loadings$X[,h] <- -spls_model$loadings$X[,h]
                   }
                 }
-                pheno <- as.data.frame(spls_model$variates$X)
-                selected_taxa_list <- lapply(seq_len(best_ncomp), function(h){
+                # pheno <- as.data.frame(spls_model$variates$X)
+                taxa_list <- lapply(seq_len(best_ncomp), function(h){
                   tmp <- try(selectVar(spls_model, comp = h)$X$value, silent = TRUE)
-                  if(inherits(tmp, "try-error") || is.null(tmp)){
+                  if(inherits(tmp, "try-error") || is.null(tmp) || nrow(tmp) == 0){
                     return(NULL)
                   }
-                  if(nrow(tmp) == 0){
-                    return(NULL)
-                  }
-                  data.frame(proxy_trait = rownames(tmp), weight = tmp[,1], comp = h, row.names = NULL)
+                  data.frame(taxa = rownames(tmp), weight = tmp[,1], comp = h, row.names = NULL)
                 })
-                selected_taxa_list <- Filter(Negate(is.null), selected_taxa_list)
-                selected_taxa_weight <- do.call(rbind, selected_taxa_list)
-                select_proxy_taxa <- unique(selected_taxa_weight$proxy_trait)
-                if(length(select_proxy_taxa) == 0){stop(paste0(train_traitname, "\tFAILED: no associated taxa selected\n"))}
+                taxa_list <- Filter(Negate(is.null), taxa_list)
+                taxa_df <- do.call(rbind, taxa_list)
+                taxa_frequency <- sort(table(taxa_df$taxa), decreasing = TRUE)
+                taxa_freq_df <- data.frame(taxa = names(taxa_frequency), frequency = as.numeric(taxa_frequency))
+                taxa_freq_df$percent_selected <- 100 * taxa_freq_df$frequency / best_ncomp
+                freq_threshold <- 0.5 * best_ncomp   # appears in ≥50% of components
+                select_proxy_taxa <- taxa_freq_df$taxa[taxa_freq_df$frequency >= freq_threshold]
+                cat(select_proxy_taxa)
+                if(length(select_proxy_taxa) == 0){stop(paste0(train_traitname, "\tFAILED: no stable taxa selected\n"))}
+                selected_taxa_weight <- taxa_df[taxa_df$taxa %in% select_proxy_taxa,]
+                colnames(selected_taxa_weight)[1] <- "proxy_trait"
+
+                X <- metag_proxy[,select_proxy_taxa, drop = FALSE]
+                Y <- metag_proxy[, train_traitname , drop = FALSE]
+                spls_model <- spls(X = X, Y = Y, ncomp = 1, keepX = ncol(X))
+                proxy_trait <- spls_model$variates$X[, 1]
+                Y_vec <- as.numeric(Y[, 1])
+                r <- cor(proxy_trait, Y_vec, method = "spearman", use = "complete.obs")
+                if (!is.na(r) && r < 0) {
+                  proxy_trait <- -proxy_trait
+                  spls_model$variates$X[, 1] <- -spls_model$variates$X[, 1]
+                  spls_model$loadings$X[, 1] <- -spls_model$loadings$X[, 1]
+                }
+                pheno <- data.frame(proxy_trait = proxy_trait)
+                selected_taxa_weight <- as.data.frame(selectVar(spls_model, comp = 1)$X$value)
+                select_proxy_taxa <- rownames(selected_taxa_weight)
+                selected_taxa_weight <- as.data.frame(cbind(proxy_trait = rownames(selected_taxa_weight), weight = selected_taxa_weight[,1]))
               }
 
               if(trait_microbial_proxy[1] == "auto-null"){
