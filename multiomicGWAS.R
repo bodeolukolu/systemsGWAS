@@ -274,6 +274,7 @@ multiomicGWAS <- function(
             if (!is.null(trait_microbial_proxy)){
               pheno_original <- pheno
               taxa_prefix <- NULL
+              overlapping_taxa <- NULL
               if (length(trait_microbial_proxy) == 1 && grepl("(_spp| spp)$", trait_microbial_proxy)){
                 taxa_prefix <- sub("(_spp| spp)$", "", trait_microbial_proxy)
                 trait_microbial_proxy <- metag$species[grepl(paste0("^", taxa_prefix, "(_| )"), metag$species)]
@@ -308,101 +309,6 @@ multiomicGWAS <- function(
               }
 
               assoc.proxy <- "NA"
-              if(trait_microbial_proxy[1] == "auto"){
-                set.seed(123)
-                X <- metag_proxy[, colnames(metag_proxy) != train_traitname, drop = FALSE]
-                Y <- metag_proxy[, train_traitname, drop = FALSE]
-                test.keepX <- c(1,2,3,4,5,10,20,30,40,50,100,200,300,400,500)
-                test.keepX <- test.keepX[test.keepX <= ncol(X)]
-                max_ncomp <- min(5, ncol(X))
-                folds <- sample(rep(1:5, length.out = nrow(X)))
-                tuning_results <- list()
-                for(ncomp in 1:max_ncomp){
-                  for(k in test.keepX){
-                    cv_cor <- c()
-                    for(f in sort(unique(folds))){
-                      train_idx <- folds != f
-                      test_idx  <- folds == f
-                      fit <- try(mixOmics::spls(
-                          X = X[train_idx, , drop = FALSE],
-                          Y = Y[train_idx, , drop = FALSE],
-                          ncomp = ncomp,
-                          keepX = rep(k, ncomp)),silent = TRUE)
-                      if(inherits(fit, "try-error"))
-                        next
-                      pred <- try(predict(fit, X[test_idx, , drop = FALSE])$predict[, , ncomp],silent = TRUE)
-                      if(inherits(pred, "try-error"))
-                        next
-                      pred <- as.numeric(pred)
-                      obs <- as.numeric(Y[test_idx, 1])
-                      r <- suppressWarnings(cor(pred, obs, method = "spearman", use = "complete.obs"))
-                      cv_cor <- c(cv_cor, r)
-                    }
-                    tuning_results[[length(tuning_results)+1]] <- data.frame(ncomp = ncomp, keepX = k,CV_R = mean(cv_cor, na.rm = TRUE))
-                  }
-                }
-                tuning_results <- do.call(rbind, tuning_results)
-                best_row <- tuning_results[which.max(tuning_results$CV_R),]
-                best_ncomp <- best_row$ncomp
-                best_keepX <- rep(best_row$keepX, best_ncomp)
-                cat("\nSelected:", "ncomp =", best_ncomp, ", keepX =", best_row$keepX, ", CV_R =", round(best_row$CV_R, 3), "\n")
-                spls_model <- mixOmics::spls(X = X, Y = Y, ncomp = best_ncomp, keepX = best_keepX)
-                Y_vec <- as.numeric(as.matrix(Y)[,1])
-                for(h in seq_len(best_ncomp)){
-                  r <- cor(spls_model$variates$X[,h], Y_vec, method = "spearman", use = "complete.obs")
-                  if(!is.na(r) && r < 0){
-                    spls_model$variates$X[,h] <- -spls_model$variates$X[,h]
-                    spls_model$loadings$X[,h] <- -spls_model$loadings$X[,h]
-                  }
-                }
-                # pheno <- as.data.frame(spls_model$variates$X)
-                taxa_list <- lapply(seq_len(best_ncomp), function(h){
-                  tmp <- try(selectVar(spls_model, comp = h)$X$value, silent = TRUE)
-                  if(inherits(tmp, "try-error") || is.null(tmp) || nrow(tmp) == 0){
-                    return(NULL)
-                  }
-                  data.frame(taxa = rownames(tmp), weight = tmp[,1], comp = h, row.names = NULL)
-                })
-                taxa_list <- Filter(Negate(is.null), taxa_list)
-                taxa_df <- do.call(rbind, taxa_list)
-                taxa_frequency <- sort(table(taxa_df$taxa), decreasing = TRUE)
-                taxa_freq_df <- data.frame(taxa = names(taxa_frequency), frequency = as.numeric(taxa_frequency))
-                taxa_freq_df$percent_selected <- 100 * taxa_freq_df$frequency / best_ncomp
-                freq_threshold <- 0.7 * best_ncomp   # appears in ≥50% of components
-                select_proxy_taxa <- taxa_freq_df$taxa[taxa_freq_df$frequency >= freq_threshold]
-                cat(select_proxy_taxa)
-                if(length(select_proxy_taxa) == 0){stop(paste0(train_traitname, "\tFAILED: no stable taxa selected\n"))}
-                selected_taxa_weight <- taxa_df[taxa_df$taxa %in% select_proxy_taxa,]
-                colnames(selected_taxa_weight)[1] <- "proxy_trait"
-
-                X <- metag_proxy[,select_proxy_taxa, drop = FALSE]
-                Y <- metag_proxy[, train_traitname , drop = FALSE]
-                spls_model <- spls(X = X, Y = Y, ncomp = 1, keepX = ncol(X))
-                proxy_trait <- spls_model$variates$X[, 1]
-                Y_vec <- as.numeric(Y[, 1])
-                r <- cor(proxy_trait, Y_vec, method = "spearman", use = "complete.obs")
-                if (!is.na(r) && r < 0) {
-                  proxy_trait <- -proxy_trait
-                  spls_model$variates$X[, 1] <- -spls_model$variates$X[, 1]
-                  spls_model$loadings$X[, 1] <- -spls_model$loadings$X[, 1]
-                }
-                pheno <- data.frame(proxy_trait = proxy_trait)
-                selected_taxa_weight <- as.data.frame(selectVar(spls_model, comp = 1)$X$value)
-                select_proxy_taxa <- rownames(selected_taxa_weight)
-                selected_taxa_weight <- as.data.frame(cbind(proxy_trait = rownames(selected_taxa_weight), weight = selected_taxa_weight[,1]))
-              }
-
-              if(trait_microbial_proxy[1] == "auto-null"){
-                set.seed(234)
-                X <- as.matrix(metag_proxy[, colnames(metag_proxy) != train_traitname , drop = FALSE])
-                pcs <- prcomp(X, center = TRUE, scale. = TRUE)$x[, 1:3, drop = FALSE]
-                R <- matrix(rnorm(9), 3, 3)
-                R <- qr.Q(qr(R))
-                pcs_rot <- pcs %*% R
-                pheno <- data.frame(proxy_null_trait = pcs_rot[, 1])
-                selected_taxa_weight <- as.data.frame(cbind(proxy_trait = "full_microbiome", value.var = 0))
-              }
-
 
               if(trait_microbial_proxy[1] != "auto" && trait_microbial_proxy[1] != "auto-null"){
                 missing_taxa <- setdiff(trait_microbial_proxy, colnames(metag_proxy))
@@ -417,29 +323,66 @@ multiomicGWAS <- function(
                   pheno <- metag_proxy[, overlapping_taxa, drop = FALSE]
                   selected_taxa_weight <- as.data.frame(cbind(proxy_trait = overlapping_taxa, value.var = 1))
                 }
-                if(length(overlapping_taxa) > 1){
-                  X <- metag_proxy[,overlapping_taxa, drop = FALSE]
-                  Y <- metag_proxy[, train_traitname , drop = FALSE]
-                  spls_model <- spls(X = X, Y = Y, ncomp = 1, keepX = ncol(X))
-                  proxy_trait <- spls_model$variates$X[, 1]
-                  Y_vec <- as.numeric(Y[, 1])
-                  r <- cor(proxy_trait, Y_vec, method = "spearman", use = "complete.obs")
-                  if (!is.na(r) && r < 0) {
-                    proxy_trait <- -proxy_trait
-                    spls_model$variates$X[, 1] <- -spls_model$variates$X[, 1]
-                    spls_model$loadings$X[, 1] <- -spls_model$loadings$X[, 1]
-                  }
-                  pheno <- data.frame(proxy_trait = proxy_trait)
-                  selected_taxa_weight <- as.data.frame(selectVar(spls_model, comp = 1)$X$value)
-                  select_proxy_taxa <- rownames(selected_taxa_weight)
-                  selected_taxa_weight <- as.data.frame(cbind(proxy_trait = rownames(selected_taxa_weight), weight = selected_taxa_weight[,1]))
-                }
               }
+
+              if(trait_microbial_proxy[1] == "auto" || length(overlapping_taxa) > 1){
+                set.seed(123)
+                if(trait_microbial_proxy[1] == "auto"){ X <- metag_proxy[, colnames(metag_proxy) != train_traitname, drop = FALSE]}
+                if(length(overlapping_taxa) > 1){X <- metag_proxy[, overlapping_taxa, drop = FALSE]}
+                Y <- metag_proxy[, train_traitname, drop = FALSE]
+                Y_vec <- as.numeric(as.matrix(Y)[,1])
+                n_boot <- 100
+                keepX_candidates <- c(10,20,30,50,100,200)
+                keepX_candidates <- keepX_candidates[keepX_candidates <= ncol(X)]
+                boot_selected <- vector("list", n_boot)
+                for(b in seq_len(n_boot)){
+                  idx <- sample(seq_len(nrow(X)), replace = TRUE)
+                  Xb <- X[idx, , drop = FALSE]
+                  Yb <- Y[idx, , drop = FALSE]
+                  fit <- try(mixOmics::spls(X = Xb, Y = Yb, ncomp = 1, keepX = sample(keepX_candidates, 1)), silent = FALSE)
+                  if(inherits(fit, "try-error")) next
+                  tmp <- try(selectVar(fit, comp = 1)$X$value, silent = TRUE)
+                  if(inherits(tmp, "try-error") || is.null(tmp) || nrow(tmp) == 0) next
+                  boot_selected[[b]] <- rownames(tmp)
+                }
+                boot_selected <- Filter(Negate(is.null), boot_selected)
+                if(length(boot_selected) == 0){stop(paste0(train_traitname, "\tFAILED: no taxa selected in bootstrap\n"))}
+                taxa_freq <- sort(table(unlist(boot_selected)), decreasing = TRUE)
+                taxa_freq_df <- data.frame(taxa = names(taxa_freq), frequency = as.numeric(taxa_freq))
+                taxa_freq_df$prop <- taxa_freq_df$frequency / n_boot
+                select_proxy_taxa <- taxa_freq_df$taxa[taxa_freq_df$prop >= 0.6]
+                if(length(select_proxy_taxa) == 0){stop(paste0(train_traitname, "\tFAILED: no stable taxa selected\n"))}
+                X_final <- X[, select_proxy_taxa, drop = FALSE]
+                spls_model <- mixOmics::spls(X = X_final, Y = Y, ncomp = 1, keepX = ncol(X_final))
+                proxy_trait <- spls_model$variates$X[,1]
+                r <- cor(proxy_trait, Y_vec, method = "spearman", use = "complete.obs")
+                if(!is.na(r) && r < 0){proxy_trait <- -proxy_trait
+                  spls_model$variates$X[,1] <- -spls_model$variates$X[,1]
+                  spls_model$loadings$X[,1] <- -spls_model$loadings$X[,1]
+                }
+                pheno <- data.frame(proxy_trait = proxy_trait)
+                tmp <- selectVar(spls_model, comp = 1)$X$value
+                selected_taxa_weight <- data.frame(proxy_trait = rownames(tmp), weight = tmp[,1], row.names = NULL)
+                select_proxy_taxa <- selected_taxa_weight$proxy_trait
+              }
+
+
+              if(trait_microbial_proxy[1] == "auto-null"){
+                set.seed(234)
+                X <- as.matrix(metag_proxy[, colnames(metag_proxy) != train_traitname , drop = FALSE])
+                pcs <- prcomp(X, center = TRUE, scale. = TRUE)$x[, 1:3, drop = FALSE]
+                R <- matrix(rnorm(9), 3, 3)
+                R <- qr.Q(qr(R))
+                pcs_rot <- pcs %*% R
+                pheno <- data.frame(proxy_null_trait = pcs_rot[, 1])
+                selected_taxa_weight <- as.data.frame(cbind(proxy_trait = "full_microbiome", value.var = 0))
+              }
+
+
               shared_samples <- intersect(traits[,1], row.names(pheno))
               pheno <- pheno[row.names(pheno) %in% shared_samples, , drop = FALSE]
               pheno <- as.data.frame(pheno)
               pheno <- pheno[, colnames(pheno) != train_traitname , drop = FALSE]
-              head(pheno)
 
               comp1_perc <- "NA"
               if(ncol(pheno) == 1){
