@@ -314,7 +314,7 @@ multiomicGWAS <- function(
                 Y <- metag_proxy[, colnames(metag_proxy) == train_traitname , drop = FALSE]
                 test.keepX <- c(1,2,3,4,5,10,20,30,40,50,100,200,300,400,500)
                 test.keepX <- test.keepX[test.keepX <= ncol(X)]
-                tuned_spls <- mixOmics::tune.spls(X = X, Y = Y, ncomp = 5, test.keepX = test.keepX, BPPARAM = BiocParallel::SerialParam(),
+                tuned_spls <- mixOmics::tune.spls(X = X, Y = Y, ncomp = 5, test.keepX = test.keepX,
                                         validation = "Mfold", folds = 5, nrepeat = 20, progressBar = TRUE, measure = "R2")
                 best_ncomp <- tuned_spls$choice.ncomp$ncomp
                 best_keepX <- sapply(1:best_ncomp, function(i) {
@@ -416,7 +416,7 @@ multiomicGWAS <- function(
                   if(is.null(taxa_prefix)){
                     traitname <- paste0(train_traitname ,"_single_proxy_",(colnames(pheno))[2])
                   } else {
-                    traitname <- paste0(train_traitname ,"_",taxa_prefix,"fixed_feature_sPLS_proxy_trait")
+                    traitname <- paste0(train_traitname ,"_",taxa_prefix,"_fixed_feature_sPLS_proxy_trait")
                   }
                   colnames(pheno) <- c("Plant_ID", traitname)
                 }
