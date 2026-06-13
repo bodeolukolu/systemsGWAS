@@ -345,29 +345,31 @@ multiomicGWAS <- function(
                 best_row <- tuning_results[which.max(tuning_results$CV_R),]
                 best_ncomp <- best_row$ncomp
                 best_keepX <- rep(best_row$keepX, best_ncomp)
-                cat("\nSelected:", "ncomp =", best_ncomp, "keepX =", best_row$keepX, "CV_R =", round(best_row$CV_R, 3), "\n")
+                cat("\nSelected:", "ncomp =", best_ncomp, ", keepX =", best_row$keepX, ", CV_R =", round(best_row$CV_R, 3), "\n")
 
                 spls_model <- mixOmics::spls(X = X, Y = Y, ncomp = best_ncomp, keepX = best_keepX)
-                Y_vec <- as.numeric(Y[,1])
+                Y_vec <- as.numeric(as.matrix(Y)[,1])
                 for(h in seq_len(best_ncomp)){
                   r <- cor(spls_model$variates$X[,h], Y_vec, method = "spearman", use = "complete.obs")
                   if(!is.na(r) && r < 0){
                     spls_model$variates$X[,h] <- -spls_model$variates$X[,h]
                     spls_model$loadings$X[,h] <- -spls_model$loadings$X[,h]
-                    if(!is.null(spls_model$loadings$Y))
-                      spls_model$loadings$Y[,h] <- -spls_model$loadings$Y[,h]
                   }
                 }
                 pheno <- as.data.frame(spls_model$variates$X)
-                selected_taxa_list <- lapply(seq_len(best_ncomp),
-                  function(h){tmp <- selectVar(spls_model,comp = h)$X$value
-                    data.frame(proxy_trait = rownames(tmp), weight = tmp[,1], comp = h,row.names = NULL
-                    )
+                selected_taxa_list <- lapply(seq_len(best_ncomp), function(h){
+                  tmp <- try(selectVar(spls_model, comp = h)$X$value, silent = TRUE)
+                  if(inherits(tmp, "try-error") || is.null(tmp)){
+                    return(NULL)
                   }
-                )
+                  if(nrow(tmp) == 0){
+                    return(NULL)
+                  }
+                  data.frame(proxy_trait = rownames(tmp), weight = tmp[,1], comp = h, row.names = NULL)
+                })
+                selected_taxa_list <- Filter(Negate(is.null), selected_taxa_list)
                 selected_taxa_weight <- do.call(rbind, selected_taxa_list)
                 select_proxy_taxa <- unique(selected_taxa_weight$proxy_trait)
-
                 if(length(select_proxy_taxa) == 0){stop(paste0(train_traitname, "\tFAILED: no associated taxa selected\n"))}
               }
 
