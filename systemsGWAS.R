@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-multiomicGWAS <- function(
+systemsGWAS <- function(
     wdir = "./",
     projname = "GWAS",
     ploidy_levels = c(2,4,6,8),

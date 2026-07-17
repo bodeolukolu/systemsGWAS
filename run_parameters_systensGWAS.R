@@ -15,9 +15,9 @@
 # remotes::install_github("jendelman/GWASpoly")
 
 
-source("https://github.com/bodeolukolu/multiomicGWAS/raw/refs/heads/main/multiomicGWAS.R")
+source("https://github.com/bodeolukolu/systemsGWAS/raw/refs/heads/main/systemsGWAS.R")
 
-multiomicGWAS (
+systemsGWAS (
     wdir = "./",
     projname = "GWAS",
     ploidy_levels = c(2,4,6,8),
