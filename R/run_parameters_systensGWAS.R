@@ -15,7 +15,8 @@
 # remotes::install_github("jendelman/GWASpoly")
 
 
-source("https://github.com/bodeolukolu/systemsGWAS/raw/refs/heads/main/systemsGWAS.R")
+systemsGWAS_url <- paste0("https://raw.githubusercontent.com/","bodeolukolu/systemsGWAS/main/R/systemsGWAS.R")
+tryCatch(source(systemsGWAS_url),error = function(e) {stop("Unable to source systemsGWAS.R: ", conditionMessage(e))})
 
 systemsGWAS (
     wdir = "./",
