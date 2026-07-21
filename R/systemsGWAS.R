@@ -811,38 +811,134 @@ systemsGWAS <- function(
               GWAS_scores_effects <- merge(GWAS_scores_effects, geno_maf, by = "SNP")
               var_y <- var(pheno[,2], na.rm = TRUE)
               colnames(GWAS_scores_effects) <- gsub("^scores\\.", "", colnames(GWAS_scores_effects))
+              # Calculate PVE using the variance of the predictor fitted by each model
+              geno_mat_imputed <- as.matrix(geno_mat)
+              if (is.null(colnames(geno_mat_imputed))) {
+                stop("geno_mat must have SNP IDs as column names.")
+              }
+              if (!is.numeric(var_y) || length(var_y) != 1L ||
+                  !is.finite(var_y) || var_y <= 0) {
+                stop("var_y must be a single positive finite value.")
+              }
 
-              # Calculate PVE
-              geno_mat_imputed <- apply(geno_mat, 2, function(col) {
-                col[is.na(col)] <- mean(col, na.rm = TRUE)
-                return(col)
-              })
-              geno_mat_imputed <- as.matrix(geno_mat_imputed)
-              max_dom <- ploidy / 2  # maximum dominance level
-              # compute SNP variance (dosage variance)
-              varX <- apply(geno_mat_imputed, 2, var, na.rm = TRUE)
-              # compute additive PVE
-              snps <- GWAS_scores_effects$SNP
-              vX <- varX[match(snps, colnames(geno_mat_imputed))]
-              GWAS_scores_effects$additive_PVE <- pmin((GWAS_scores_effects$additive_effects^2 * vX) / var_y, 1)
-              # compute dominance PVE
-              for(d in 1:max_dom){
-                alt_col <- paste0(d, "-dom-alt_effects")
-                ref_col <- paste0(d, "-dom-ref_effects")
-                # alt dominance PVE
-                if(alt_col %in% colnames(GWAS_scores_effects)) {
-                  snps <- GWAS_scores_effects$SNP
-                  # use corresponding genotype variance
-                  vX <- varX[match(snps, colnames(geno_mat_imputed))]
-                  GWAS_scores_effects[[paste0(d,"-dom-alt_PVE")]] <- pmin((GWAS_scores_effects[[alt_col]]^2 * vX) / var_y, 1)
+              # GWASpoly normally imputes genotype data during import.
+              # This fallback reproduces its general imputation behaviour:
+              #   - fractional dosage data: marker mean
+              #   - integer dosage data: marker mode
+              impute_mean <- function(x) {
+                if (all(is.na(x))) {
+                  stop("A genotype column contains only missing values.")
                 }
-                # ref dominance PVE
-                if(ref_col %in% colnames(GWAS_scores_effects)) {
-                  snps <- GWAS_scores_effects$SNP
-                  vX <- varX[match(snps, colnames(geno_mat_imputed))]
-                  GWAS_scores_effects[[paste0(d,"-dom-ref_PVE")]] <- pmin((GWAS_scores_effects[[ref_col]]^2 * vX) / var_y, 1)
+
+                x[is.na(x)] <- mean(x, na.rm = TRUE)
+                x
+              }
+              impute_mode <- function(x) {
+                if (all(is.na(x))) {
+                  stop("A genotype column contains only missing values.")
+                }
+
+                observed <- x[!is.na(x)]
+                mode_value <- as.numeric(names(which.max(table(observed))))
+                x[is.na(x)] <- mode_value
+                x
+              }
+              has_fractional_dosage <- any(
+                abs(geno_mat_imputed - round(geno_mat_imputed)) > 1e-8,
+                na.rm = TRUE
+              )
+              if (anyNA(geno_mat_imputed)) {
+                if (has_fractional_dosage) {
+                  geno_mat_imputed <- apply(
+                    geno_mat_imputed,
+                    2,
+                    impute_mean
+                  )
+                } else {
+                  geno_mat_imputed <- apply(
+                    geno_mat_imputed,
+                    2,
+                    impute_mode
+                  )
+                }
+
+                geno_mat_imputed <- as.matrix(geno_mat_imputed)
+              }
+
+              # Match GWAS results to genotype columns once
+              snp_index <- match(
+                GWAS_scores_effects$SNP,
+                colnames(geno_mat_imputed)
+              )
+              if (anyNA(snp_index)) {
+                warning(
+                  sum(is.na(snp_index)),
+                  " SNP(s) in GWAS_scores_effects were not found in geno_mat."
+                )
+              }
+              calculate_pve <- function(effect, predictor_variance) {
+                pve <- (effect^2 * predictor_variance) / var_y
+                pve[!is.finite(pve)] <- NA_real_
+
+                # Retained from the original code.
+                # Consider removing pmin() during diagnostics so values >1 are visible.
+                pmin(pve, 1)
+              }
+
+              # ------------------------------------------------------------------
+              # Additive PVE: predictor is alternate-allele dosage
+              # ------------------------------------------------------------------
+              additive_variance <- apply(
+                geno_mat_imputed,
+                2,
+                var
+              )
+              v_add <- additive_variance[snp_index]
+              GWAS_scores_effects$additive_PVE <- calculate_pve(
+                effect = GWAS_scores_effects$additive_effects,
+                predictor_variance = v_add
+              )
+
+              # ------------------------------------------------------------------
+              # Dominance PVE: predictor is the model-specific binary coding
+              # ------------------------------------------------------------------
+              geno_dom <- round(geno_mat_imputed)
+              max_dom <- ploidy %/% 2L
+              for (d in seq_len(max_dom)) {
+
+                alt_effect_col <- paste0(d, "-dom-alt_effects")
+                ref_effect_col <- paste0(d, "-dom-ref_effects")
+
+                # GWASpoly d-dom-alt coding:
+                # 0 when alternate dosage < d
+                # 1 when alternate dosage >= d
+                dom_alt <- 1L * (geno_dom >= d)
+
+                # GWASpoly d-dom-ref coding:
+                # 0 when alternate dosage <= ploidy - d
+                # 1 when alternate dosage >  ploidy - d
+                dom_ref <- 1L * (geno_dom > (ploidy - d))
+
+                dom_alt_variance <- apply(dom_alt, 2, var)
+                dom_ref_variance <- apply(dom_ref, 2, var)
+
+                if (alt_effect_col %in% colnames(GWAS_scores_effects)) {
+                  GWAS_scores_effects[[paste0(d, "-dom-alt_PVE")]] <-
+                    calculate_pve(
+                      effect = GWAS_scores_effects[[alt_effect_col]],
+                      predictor_variance = dom_alt_variance[snp_index]
+                    )
+                }
+
+                if (ref_effect_col %in% colnames(GWAS_scores_effects)) {
+                  GWAS_scores_effects[[paste0(d, "-dom-ref_PVE")]] <-
+                    calculate_pve(
+                      effect = GWAS_scores_effects[[ref_effect_col]],
+                      predictor_variance = dom_ref_variance[snp_index]
+                    )
                 }
               }
+
 
               write.table(GWAS_scores_effects, file=paste("./scores_effects/","score_effects_",traitname,".txt",sep=""), row.names=F, quote = FALSE, sep = "\t")
               colnames(GWAS_logP) <- gsub("_scores", "", colnames(GWAS_logP)); GWAS_logP <- GWAS_logP[,-1]
@@ -1147,9 +1243,10 @@ systemsGWAS <- function(
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
-                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
+                    # Invisible points used only to construct the legend
+                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1176,9 +1273,9 @@ systemsGWAS <- function(
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
-                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
+                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1206,9 +1303,9 @@ systemsGWAS <- function(
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
-                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
+                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1235,9 +1332,9 @@ systemsGWAS <- function(
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
-                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
+                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1265,9 +1362,9 @@ systemsGWAS <- function(
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
-                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
+                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1294,9 +1391,9 @@ systemsGWAS <- function(
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
-                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
+                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1324,9 +1421,9 @@ systemsGWAS <- function(
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
-                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
+                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1353,9 +1450,9 @@ systemsGWAS <- function(
                           strip.text.x = element_text(size=30,color="black"), strip.text.y = element_text(size=40,color="black"),
                           axis.line=element_line(colour="white")) +
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
-                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape=22) +
+                    geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow=1, keywidth = 3, keyheight = 3)) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
