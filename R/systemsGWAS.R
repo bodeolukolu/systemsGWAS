@@ -1246,7 +1246,7 @@ systemsGWAS <- function(
                     # Invisible points used only to construct the legend
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10, guide="none"))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1275,7 +1275,7 @@ systemsGWAS <- function(
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10, guide="none"))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1305,7 +1305,7 @@ systemsGWAS <- function(
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10, guide="none"))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1334,7 +1334,7 @@ systemsGWAS <- function(
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10, guide="none"))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1364,7 +1364,7 @@ systemsGWAS <- function(
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10, guide="none"))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1393,7 +1393,7 @@ systemsGWAS <- function(
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10, guide="none"))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1423,7 +1423,7 @@ systemsGWAS <- function(
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10, guide="none"))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
@@ -1452,7 +1452,7 @@ systemsGWAS <- function(
                     theme(plot.title = element_text(hjust = 0.5)) + ylim(c(0,NA)) +
                     geom_point(data = legend_df, aes(x = x, y = y, fill = threshold), inherit.aes = FALSE, size = 10, shape = 22, alpha = 0, show.legend = TRUE) +
                     scale_fill_manual(values = setNames(legend_df$color, legend_df$threshold)) +
-                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10))) +
+                    guides(fill = guide_legend(title = "Thresholds: ", nrow = 1, keywidth = 3, keyheight = 3, override.aes = list(alpha = 1, shape = 22, size = 10, guide="none"))) +
                     theme(legend.position = "top", legend.justification = "right",  legend.box.just = "right", legend.background = element_rect(fill = "white", color = "white")) +
                     coord_cartesian(clip = "off") +
                     labs(title= paste(traitname,"\n",sep="")) + theme(plot.title = element_text(hjust = 0, vjust=-10))
