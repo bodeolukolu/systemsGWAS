@@ -1,252 +1,433 @@
+<p align="center">
+  <img src="misc/systemsGWAS_logo.png" alt="systemsGWAS logo" width="620">
+</p>
+
 # systemsGWAS
-### Formerly **multiomicGWAS**
 
-> **systemsGWAS** is an integrative genome-wide association framework designed to identify the genetic architecture underlying observed phenotypes, latent biological traits, and systems-level interactions across genetics, environments, management, and multi-omic data.
+**Genome-wide association analysis of measured phenotypes, microbiome and phenomic features, and composite biological traits.**
 
-⚠️ **Repository transition**
+**systemsGWAS** is an R pipeline that combines marker dosage data with measured phenotypes or traits constructed from microbiome and phenomic features, including numeric measurements extracted from hyperspectral or drone imagery. It supports GWAS of individual features, unsupervised composites, and phenotype-informed proxies selected and weighted using sparse partial least squares (sPLS). Phenomic feature tables can replace microbiome tables; compatible feature sets from microbiome and phenomic data can also be combined after source-specific preprocessing, with feature centring and scaling performed internally for PC1 and sPLS. Association analyses uses **GWASpoly**, with genomic relationship matrices constructed using **AGHmatrix**, for diploid, tetraploid, hexaploid, and octoploid dosage data.
 
-This repository was originally developed as **multiomicGWAS**. The software is currently transitioning to **systemsGWAS** to reflect its expanded scope beyond conventional multi-omic GWAS.
+The existing `metag_data_species` and `microbial_*` argument names are used for both microbiome and phenomic inputs. The pipeline reads extracted numeric features, not raw image files. See [phenomic input requirements](#phenomic-features-from-hyperspectral-or-drone-imaging) for transformations and the current nonnegative-input requirement.
 
-Repository:
-https://github.com/bodeolukolu/multiomicGWAS
+Formerly **multiomicGWAS**. The repository is now [bodeolukolu/systemsGWAS](https://github.com/bodeolukolu/systemsGWAS).
 
-The repository name will be updated to **systemsGWAS** following completion of the accompanying methodological manuscripts.
+## What can I analyse?
 
----
+| Analysis | GWAS outcome | Does constructing the outcome use a target phenotype such as FER? |
+|---|---|---|
+| Conventional GWAS | A measured trait, such as Fusarium ear rot (FER) severity | Uses that measured trait directly |
+| Single-feature GWAS | One microbial abundance or phenomic measurement, such as a spectral band or canopy-cover estimate | No |
+| Summed-abundance GWAS | Total abundance of a selected group of species | No |
+| PC1-composite GWAS | First principal component of selected microbiome or phenomic features | No |
+| sPLS-proxy GWAS | Weighted microbiome or phenomic component trained against a target phenotype | Yes, when learning the weights |
+| Saved-weight GWAS | A numeric score calculated using previously exported weights | No new target observations are required; the original weights retain their training history |
 
-# Introduction
+Current capabilities also include marker filtering, additive and dominance effect models, numeric phenotype covariates, optional leave-one-chromosome-out (LOCO) kinship, association tables, and Manhattan and QQ plots. A legacy microbiome-adjustment pathway is retained for existing analyses.
 
-Genome-wide association studies have traditionally focused on identifying loci controlling individual phenotypic traits. While highly successful, modern breeding increasingly requires understanding coordinated biological processes involving multiple interacting traits, environments, management practices, and host-associated omics.
+**Scope:** multiple entries in `trait_names` request separate single-trait scans. They do not fit a joint multi-trait model. Native joint multi-trait and G×E association models are roadmap items.
 
-**systemsGWAS** extends conventional GWAS by providing a unified framework capable of analysing:
+## Installation
 
-- Conventional phenotypic traits
-- Multi-trait analyses
-- Secondary traits
-- Host-associated microbiome and metagenome profiles
-- Latent biological phenotypes
-- Environment-specific trait architectures
-- Future systems-level phenotypes such as the Developmental Blueprint Index (DBI)
+Clone the repository:
 
-The framework leverages **GWASpoly** for association analysis across ploidy levels (2x–8x) while providing automated data integration, relationship matrix construction, and flexible phenotypic modelling.
-
-Relationship matrices are generated automatically, including:
-
-- Genomic relationship matrices (GRM) using **AGHmatrix**
-- Microbiome/metagenome kernels using Aitchison compositional distances
-- Additional user-defined kernels (planned)
-
-This architecture enables integrative systems-genetics analyses rather than treating genomic and omic datasets independently.
-
----
-
-# Current Features
-
-✔ GWAS across diploid through octoploid populations
-
-✔ Automated genotype quality control
-
-✔ Multiple GWASpoly genetic models
-
-✔ Automatic genomic relationship matrix construction
-
-✔ Integration of microbiome/metagenome abundance data
-
-✔ Microbial taxa analysed as either:
-
-- covariates
-- independent phenotypes
-
-✔ Automatic microbiome kernel construction
-
-✔ Flexible phenotype processing
-
-✔ Publication-quality figures
-
----
-
-# Planned systemsGWAS Features
-
-The long-term vision is to evolve systemsGWAS into a comprehensive systems genetics platform.
-
-Planned capabilities include:
-
-### Latent Phenotype GWAS
-
-- Developmental Blueprint Index (DBI)
-- user-defined latent phenotypes
-- PCA-derived traits
-- factor-analysis traits
-
----
-
-### Multi-environment GWAS
-
-- environment-specific GWAS
-- stability GWAS
-- plasticity GWAS
-- G×E association analyses
-
----
-
-### Systems Genetics
-
-Integration of
-
-- genomic data
-- transcriptomics
-- metabolomics
-- microbiome
-- environmental variables
-- management variables
-
-within a unified association framework.
-
----
-
-### Crop Systems Integration
-
-Future releases will support integration with crop systems modelling, allowing latent developmental phenotypes and environment-specific ideotypes to be analysed alongside genomic data.
-
----
-
-# Software Roadmap
-
-Version | Focus
---------|-------------------------------------------------
-v1.x | multiomicGWAS
-v2.x | systemsGWAS architecture
-v2.x | latent phenotype framework
-v2.x | multi-environment GWAS
-v3.x | systems genetics
-v4.x | crop systems integration (APSIM support)
-
----
-
-# Installation
-
-Clone the repository
-
-```bash
-git clone https://github.com/bodeolukolu/multiomicGWAS.git
-```
-
-After the repository rename:
-
-```bash
+```sh
 git clone https://github.com/bodeolukolu/systemsGWAS.git
+cd systemsGWAS
 ```
 
----
+Install the dependencies in R before running a full GWAS:
 
-# Running systemsGWAS
-
-Download
-
+```r
+cran_packages <- c(
+  "devtools", "BiocManager", "AGHmatrix", "qqplotr", "corrplot", "ggcorrplot",
+  "ggplot2", "plyr", "dplyr", "tidyr", "car", "MASS", "Hmisc", "data.table",
+  "stringr", "heatmaply", "ppcor", "zoo", "GGally", "reshape2", "compositions",
+  "sommer", "mice"
+)
+missing_packages <- cran_packages[
+  !vapply(cran_packages, requireNamespace, quietly = TRUE, FUN.VALUE = logical(1))
+]
+if (length(missing_packages)) {
+  install.packages(missing_packages, repos = "https://cloud.r-project.org")
+}
+if (!requireNamespace("GWASpoly", quietly = TRUE)) {
+  devtools::install_github("jendelman/GWASpoly", build_vignettes = FALSE)
+}
+bioc_packages <- c("mixOmics", "qvalue")
+missing_bioc <- bioc_packages[
+  !vapply(bioc_packages, requireNamespace, quietly = TRUE, FUN.VALUE = logical(1))
+]
+if (length(missing_bioc)) BiocManager::install(missing_bioc, ask = FALSE, update = FALSE)
 ```
-run_parameters_systemsGWAS.R
+
+Use compatible R and Bioconductor releases. The microbial-composite module was tested with R 4.5.0 and mixOmics 6.37.0 on Linux. The full GWAS engine loads its broader dependency set even when some packages are not needed by the selected analysis.
+
+For **preparation only** (`run_gwas = FALSE`), independent composites and saved-weight application use base R; sPLS additionally needs mixOmics. Genotypes and the GWAS package set are not required for preparation.
+
+## Input files
+
+Use tab-separated files with headers. Sample identifiers must match exactly across the inputs used in an analysis. The tables below illustrate layout only: a full GWAS currently requires at least **1,000 markers passing the filtering used for relationship-matrix construction**.
+
+### Marker dosage data
+
+Provide a separate file for each requested ploidy through `genofile_2x`, `genofile_4x`, `genofile_6x`, or `genofile_8x`. The first five columns are `SNP`, `CHROM`, `POS`, `REF`, and `ALT`; subsequent columns are sample IDs.
+
+```text
+SNP	CHROM	POS	REF	ALT	Line01	Line02	Line03
+SNP_001	1	10500	A	G	0	1	2
+SNP_002	1	21900	C	T	2	0	1
+SNP_003	2	31700	G	A	1	NA	0
 ```
 
-Edit the analysis parameters and execute the pipeline.
+Dosages range from 0 to the relevant ploidy; use `NA` for missing genotypes. Selecting a ploidy does not convert another dosage file into that ploidy.
 
-The parameter file controls:
+### Phenotypes and numeric covariates
 
-- genotype input
-- phenotype input
-- covariates
-- microbiome/metagenome analyses
-- GWAS models
-- filtering
-- output directories
-- plotting options
+The first column contains sample IDs; subsequent columns contain numeric traits or covariates. Use `NA` for missing measurements. Duplicate phenotype IDs are averaged per column.
 
----
+```text
+Plant_ID	FER	NI	Inoc	DTA
+Line01	12.4	8.1	16.7	65
+Line02	20.8	14.3	27.3	68
+Line03	NA	10.2	NA	63
+```
 
-# Dependencies
+`phenofile` is required for conventional trait GWAS, sPLS training, or requested phenotype covariates. It is unnecessary for independent microbiome/phenomic outcomes or saved-weight application without those covariates.
 
-Core packages include
+### Microbial abundance data
 
-- GWASpoly
-- AGHmatrix
-- sommer
-- compositions
-- mice
-- qvalue
+For the new microbial workflow, `metag_data_species` accepts either orientation below.
 
-Data manipulation
+**Samples in rows:** the ID column can be `Plant_ID`, `SampleID`, `Sample_ID`, or `Taxa`; all remaining columns are numeric features.
 
-- data.table
-- dplyr
-- stringr
-- reshape2
-- zoo
+```text
+Plant_ID	Fusarium_verticillioides	Fusarium_proliferatum	Other_species
+Line01	120	30	850
+Line02	80	60	860
+Line03	150	10	840
+```
 
-Visualisation
+**Species in rows:** identify features with a `species` or `Feature` column and use sample IDs as the abundance columns. Recognised taxonomy columns, such as `genus`, `family`, `order`, `class`, `phylum`, `kingdom`, and `domain`, are ignored.
 
-- ggplot2
-- qqplotr
-- heatmaply
-- GGally
+```text
+species	genus	Line01	Line02	Line03
+Fusarium_verticillioides	Fusarium	120	80	150
+Fusarium_proliferatum	Fusarium	30	60	10
+Other_species	Other	850	860	840
+```
 
-Statistics
+Abundances must be finite and nonnegative, with unique sample IDs and feature names. Zero means measured absence; missing measurements are not automatically replaced with zero. Pass the complete intended reference microbiome even when selecting a genus: relative abundance and CLR use all input features as their reference.
 
-- ppcor
+### Phenomic features from hyperspectral or drone imaging
 
-Additional packages may be required for optional modules.
+Supply a feature table through **the same `metag_data_species` argument**, for example `metag_data_species = "phenomic_features.tsv"`. Use one sample per row with `Plant_ID` followed by numeric measurements, or the transposed layout with a `Feature` column. Features may represent spectral reflectances, nonnegative vegetation indices, canopy cover, height, or other measurements extracted from imagery.
 
----
+```text
+Plant_ID	HS_450nm	HS_550nm	HS_650nm	HS_750nm	HS_850nm	UAV_canopy_cover
+Line01	0.08	0.12	0.09	0.35	0.48	0.82
+Line02	0.10	0.15	0.11	0.31	0.42	0.74
+Line03	0.07	0.11	0.08	0.39	0.51	0.89
+```
 
-# Publications
+Image calibration, segmentation, feature extraction, and preparation of a sample-level table happen **outside systemsGWAS**. Do not supply JPEGs, TIFFs, orthomosaics, or hyperspectral image cubes directly. Match the feature-table IDs to the genotypes; resolve repeated plots, dates, or environments appropriately before producing the single row per ID required by this feature reader. It does not fit a plot-design or G×E model during feature construction.
 
-Applications of systemsGWAS include:
+For phenomic tables, explicitly set:
 
-*(To be updated following publication.)*
+```r
+# Include these arguments in the systemsGWAS() call:
+# microbial_transform = "none",  # preserve the supplied measurement scale
+# microbial_prevalence = 0       # disable the microbial presence/absence filter
+```
 
----
+`"auto"` would otherwise apply CLR to PC1/sPLS inputs. Closing heterogeneous image-derived measurements to a common total is not part of this phenomic workflow. With `"none"`, PC1 and sPLS still centre and scale each candidate feature internally; single-feature mode preserves the supplied values. Use `sum` only when summing features has a meaningful interpretation and compatible units.
 
-# Citation
+**Current input constraint:** this feature reader requires all values to be finite and nonnegative, even with `microbial_transform = "none"`. Resolve missing measurements before import. Some vegetation indices, centred/z-scored features, and signed residuals can be negative and therefore cannot be passed directly through this reader. Do not replace negative values with zero merely to satisfy validation. Such individual traits can be analysed through `phenofile`; for a composite of signed features, construct the score externally and import that numeric outcome through `phenofile`. The reader's nonnegative constraint does not apply to ordinary phenotype columns or to the PC1/sPLS scores it generates.
 
-If you use systemsGWAS in your research, please cite the accompanying publication once available.
+Use consistent feature names, units, extraction settings, and preprocessing when reapplying weights. Learn any data-dependent external preprocessing on the training set when evaluating prediction, and apply those same parameters to validation/new samples. The weights file stores the pipeline's transformation, centring, and scaling; it does not store external image-processing or imputation steps.
 
-Until then, please reference the GitHub repository:
+## Quick start: conventional trait GWAS
 
-https://github.com/bodeolukolu/multiomicGWAS
+Run the following from the repository root after editing `data_dir` and the filenames:
 
----
+```r
+source("R/systemsGWAS.R")
+data_dir <- "/path/to/data"
 
-# Contributing
+systemsGWAS(
+  wdir = data_dir,
+  projname = "FER_GWAS",
+  ploidy_levels = 2,
+  genofile_2x = "genotypes.tsv",
+  phenofile = "traits.tsv",
+  trait_names = "FER",
+  covariate_pheno = "DTA",
+  method = "MLM",
+  model_effect = "Add",
+  maf = 0.02,
+  cores = 1
+)
+```
 
-Bug reports, feature requests, and pull requests are welcome.
+Set `covariate_pheno = NULL` if no phenotype covariates are required. For separate scans of several traits, use a vector such as `trait_names = c("NI", "Inoc", "FER")`.
 
-Suggestions for extending systemsGWAS to additional omic data types, latent phenotype analyses, or systems genetics applications are encouraged.
+Alternatively, edit [R/run_parameters_systensGWAS.R](R/run_parameters_systensGWAS.R), which describes all public arguments and their defaults. Set its `wdir` to your data directory, then run it from the `R` directory:
 
----
+```sh
+cd R
+Rscript run_parameters_systensGWAS.R
+```
 
-# Contact
+The filename above retains the existing `systensGWAS` spelling for compatibility. Its `source("systemsGWAS.R")` line assumes the two scripts are in the same working directory.
 
-Dr. Bode A. Olukolu
+## Select microbiome or phenomic features and construct an outcome
 
-Science Leader – Crop Genetics
+Two arguments control the main choice: `microbial_features` selects the input features, and `microbial_method` defines the numeric outcome. Their names are retained for compatibility when the table contains phenomic measurements.
 
-Department of Primary Industries
+| Goal | `microbial_features` | `microbial_method` | `microbial_response` |
+|---|---|---|---|
+| Fv abundance | `"Fusarium_verticillioides"` | `"single"` | `NULL` |
+| Total Fusarium abundance | `"Fusarium*"` | `"sum"` | `NULL` |
+| Fusarium PC1 | `"Fusarium*"` | `"pc1"` | `NULL` |
+| FER-informed Fusarium proxy | `"Fusarium*"` | `"spls"` | `"FER"` |
+| FER-informed whole-microbiome proxy | `"all"` | `"spls"` | `"FER"` |
+| Hyperspectral PC1 | `"HS_*"` | `"pc1"` | `NULL` |
+| FER-informed phenomic proxy | `"all"` or `"HS_*"` | `"spls"` | `"FER"` |
+| Apply saved microbiome/phenomic weights | `NULL` | `"weighted"` | `NULL` |
 
-Queensland, Australia
+Exact vectors, for example `c("Fusarium_verticillioides", "Fusarium_proliferatum")`, and comma-separated lists are accepted. `"Fusarium*"` matches names starting with `Fusarium`. The compatible selectors `"Fusarium_spp"` and `"Fusarium spp"` match names starting with `Fusarium_` or `Fusarium `. Matching is case-sensitive. Phenomic prefixes work identically: `"HS_*"` selects names beginning with `HS_`, while `c("HS_*", "UAV_*")` selects both groups. Use `"all"` for every feature in the supplied table. For phenomic analyses, also specify `microbial_transform = "none"` and `microbial_prevalence = 0`.
 
-Email:
-bolukolu@utk.edu
+The default `microbial_method = "auto"` chooses `single` for one matched feature and `pc1` for multiple matched features. It does not train on FER. One new feature-derived outcome is constructed per call.
 
----
+### Independent species abundance or composite
 
-# Versioning
+This example maps Fusarium PC1 without using FER values:
 
-This project follows Semantic Versioning:
+```r
+systemsGWAS(
+  wdir = data_dir,
+  projname = "Fusarium_PC1_GWAS",
+  ploidy_levels = 2,
+  genofile_2x = "genotypes.tsv",
+  metag_data_species = "metag_species.tsv",
+  trait_names = NULL,
+  microbial_features = "Fusarium*",
+  microbial_method = "pc1",
+  microbial_trait_name = "Fusarium_PC1",
+  method = "MLM"
+)
+```
 
-https://semver.org/
+For Fv alone, change `microbial_features` to `"Fusarium_verticillioides"`, `microbial_method` to `"single"`, and the project/trait names accordingly. For total Fusarium abundance, use `microbial_method = "sum"`. Use a distinct project prefix for each analysis.
 
----
+### Learn an FER-informed proxy, then apply it to GWAS
 
-# License
+First, select stable species, estimate weights, and save the numeric proxy without running GWAS:
 
-Apache License 2.0
+```r
+proxy <- systemsGWAS(
+  wdir = data_dir,
+  projname = "FER_proxy_training",
+  phenofile = "traits.tsv",
+  metag_data_species = "metag_species.tsv",
+  microbial_features = "Fusarium*",
+  microbial_method = "spls",
+  microbial_response = "FER",
+  microbial_trait_name = "Fusarium_FER_proxy",
+  microbial_bootstraps = 100L,
+  microbial_stability = 0.60,
+  run_gwas = FALSE
+)
+```
 
-https://github.com/bodeolukolu/multiomicGWAS/blob/master/LICENSE
+Use `microbial_features = "all"` to search the full microbiome, or provide a list/prefix to restrict the candidate species. Training uses samples with finite observed FER values, but the fitted component scores all microbiome samples, including those without FER observations.
+
+Then apply the exported weights and map the composite:
+
+```r
+systemsGWAS(
+  wdir = data_dir,
+  projname = "FER_proxy_GWAS",
+  ploidy_levels = 2,
+  genofile_2x = "genotypes.tsv",
+  metag_data_species = "metag_species.tsv",
+  microbial_method = "weighted",
+  microbial_weights = "FER_proxy_training_microbial_traits/Fusarium_FER_proxy_weights.tsv",
+  microbial_trait_name = "Fusarium_FER_proxy",
+  method = "MLM"
+)
+```
+
+The second call does not require FER. The weights can also be applied to another cohort with the same reference features and compatible measurement/preprocessing. To learn a proxy and run GWAS in one call, instead set `run_gwas = TRUE` in the training call and supply the required genotype file and ploidy.
+
+### Phenomic PC1 and phenotype-informed proxies
+
+Map a hyperspectral composite without using FER values:
+
+```r
+systemsGWAS(
+  wdir = data_dir,
+  projname = "Hyperspectral_PC1_GWAS",
+  ploidy_levels = 2,
+  genofile_2x = "genotypes.tsv",
+  metag_data_species = "phenomic_features.tsv",
+  trait_names = NULL,
+  microbial_features = "HS_*",
+  microbial_method = "pc1",
+  microbial_transform = "none",
+  microbial_prevalence = 0,
+  microbial_trait_name = "Hyperspectral_PC1",
+  method = "MLM"
+)
+```
+
+For a single measurement, use `microbial_features = "UAV_canopy_cover"` and `microbial_method = "single"`, keeping `microbial_transform = "none"` and `microbial_prevalence = 0`.
+
+To learn a phenomic proxy for FER instead, use sPLS with the observed disease ratings:
+
+```r
+phenomic_proxy <- systemsGWAS(
+  wdir = data_dir,
+  projname = "Phenomic_FER_training",
+  phenofile = "traits.tsv",
+  metag_data_species = "phenomic_features.tsv",
+  microbial_features = "all",
+  microbial_method = "spls",
+  microbial_response = "FER",
+  microbial_transform = "none",
+  microbial_prevalence = 0,
+  microbial_trait_name = "Phenomic_FER_proxy",
+  microbial_bootstraps = 100L,
+  microbial_stability = 0.60,
+  run_gwas = FALSE
+)
+```
+
+This exports selected feature weights and the numeric proxy just as for microbiome inputs. Multi-feature sPLS has the same minimum of five variable candidates after filtering; it also requires at least five observed training samples and a variable response. The three-row input illustration above is not a training dataset.
+
+Reuse `Phenomic_FER_training_microbial_traits/Phenomic_FER_proxy_weights.tsv` with `microbial_method = "weighted"` and a compatible phenomic table, following the saved-weight GWAS example above. The stored transformation is `"none"`; it is restored automatically along with the learned centres/scales. A newly supplied transformation does not override the saved model's preprocessing. FER observations are not needed when applying the saved weights unless separately requested as a covariate.
+
+### Combining microbiome and phenomic features
+
+Compatible nonnegative feature blocks can be joined by sample ID into one table and supplied through `metag_data_species`. Use distinct column prefixes, for example `MB_`, `HS_`, and `UAV_`, to retain each feature's source and support prefix selection. Exclude IDs, dates, treatment labels, and other metadata from the numeric feature columns.
+
+Apply appropriate **source-specific preprocessing** before joining the blocks, then use `microbial_transform = "none"` and `microbial_prevalence = 0`. Apply any desired microbiome prevalence filtering separately before constructing the combined table. PC1/sPLS perform **feature standardisation** internally (centring and unit-variance scaling). This does not impose equal total weight on each data source: the pipeline fits the concatenated features and has no separate block-weight control. Retain the same feature definitions and external preprocessing when applying saved weights.
+
+Do not apply CLR to the entire combined table. If the intended preprocessing produces signed values—for example a CLR microbiome block or pre-standardised phenomic block—the current reader cannot accept that combined matrix. Construct the composite externally and map its numeric score through `phenofile` instead.
+
+## Transformations and weights
+
+| `microbial_transform` | Behaviour |
+|---|---|
+| `"auto"` | Relative abundance for `sum`; CLR for `single`, `pc1`, and `spls` |
+| `"none"` | Retain supplied values; use explicitly for compatible phenomic or combined feature tables |
+| `"relative"` | Divide abundances by each sample's total |
+| `"clr"` | Close to proportions, add the pseudocount, then centre log abundances within each sample |
+| `"log1p"` | Apply log(1 + abundance) |
+
+The CLR pseudocount defaults to `1e-6`. CLR measures abundance relative to the reference community; it is not an estimate of absolute microbial load. Do not supply a pre-transformed CLR matrix to the abundance reader, which requires nonnegative values. With only one species in the entire input matrix, use `none` or `log1p`: CLR cannot produce a variable single-column score.
+
+The `"auto"` defaults remain microbiome-oriented. For phenomic features, use `"none"` and disable prevalence filtering as shown above.
+
+PC1 and sPLS centre and scale candidate features to unit variance. PC1 is oriented so that its largest absolute loading is positive; sPLS is oriented towards a positive Spearman correlation with its training response. A negative weight therefore describes an opposing contribution to the composite, not evidence of a protective or causal biological effect.
+
+The exported score is:
+
+```text
+score_i = sum_j Weight_j * (transformed_feature_ij - Center_j) / Scale_j
+```
+
+sPLS weights are component loadings, not regression coefficients in FER units. A single-feature sPLS component only standardises and orients that feature. Use `sum` when the intended outcome is total abundance rather than a weighted pattern of community variation.
+
+### sPLS feature selection
+
+The default procedure uses 100 row bootstraps, a minimum selection frequency of 0.60, and one final component fitted to the stable subset. Each bootstrap draws `keepX` from `c(5, 10, 20, 30, 50, 100, 200)`, restricted to the number of available candidates; it is not a cross-validated tuning search.
+
+Multi-feature selection, for microbiome or phenomic inputs, requires **at least five variable candidates after filtering**. Five to nine candidates use `keepX = 5`; with exactly five, the screen cannot select a smaller subset. A single-feature score is supported separately. The 5% prevalence default filters candidate features; for sPLS, prevalence and scaling are estimated using the observed training samples.
+
+Selection frequency uses all attempted bootstraps as the denominator. Failed fits do not inflate stability. If no stable features remain, the run stops with a diagnostic message; the bootstrap log is saved.
+
+An sPLS proxy trained on FER is an **FER-informed microbiome or phenomic phenotype**. Its training correlation is descriptive, not cross-validated predictive ability or independent confirmation of FER-associated loci. Evaluate proxy performance using held-out samples or independent data. The GWAS treats the constructed score as fixed and does not propagate uncertainty from estimating the weights.
+
+## Key arguments and defaults
+
+| Argument | Default | Purpose |
+|---|---|---|
+| `microbial_features` | `NULL` | Select microbiome/phenomic feature names, a prefix, or `"all"`; activate construction |
+| `microbial_method` | `"auto"` | Choose `single`, `sum`, `pc1`, `spls`, or `weighted` |
+| `microbial_response` | `NULL` | Training phenotype column for sPLS |
+| `microbial_weights` | `NULL` | Complete exported weights file for reuse |
+| `microbial_trait_name` | `"Microbial_composite"` | Numeric outcome column and output filename prefix |
+| `microbial_transform` | `"auto"` | Transformation; explicitly use `"none"` for phenomic features; saved weights restore their original setting |
+| `microbial_prevalence` | `0.05` | Minimum fraction of samples with positive values; set `0` for phenomic tables |
+| `microbial_bootstraps` | `100L` | Number of sPLS resamples |
+| `microbial_stability` | `0.60` | Minimum bootstrap selection frequency |
+| `microbial_seed` | `123L` | Reproducible sPLS resampling seed |
+| `microbial_pseudocount` | `1e-6` | Positive offset for CLR after conversion to proportions |
+| `run_gwas` | `TRUE` | Set `FALSE` to construct/export a microbiome or phenomic outcome only |
+
+Use letters, digits, and underscores for `microbial_trait_name`, beginning with a letter. `projname` is a simple directory prefix. File paths can be absolute or relative to `wdir`.
+
+For the GWAS engine, `maf = 0.02` retains markers with MAF at least 2%; `cores = 1` controls GWASpoly workers; and `LOCO = FALSE` uses the supplied whole-marker kinship. Full argument descriptions are in the parameter script.
+
+## Output files
+
+Feature preparation writes to `<projname>_microbial_traits/`. This directory name is also used for phenomic inputs for compatibility. Each filename begins with `microbial_trait_name`.
+
+| Suffix | Contents |
+|---|---|
+| `_composite.tsv` | Sample ID and numeric constructed outcome |
+| `_weights.tsv` | Complete reference feature set, weights, centres, scales, and transformation metadata |
+| `_selected_weights.tsv` | Nonzero-weight microbial or phenomic features for interpretation |
+| `_gwas_phenotypes.tsv` | Outcome plus explicitly requested numeric phenotype covariates |
+| `_summary.tsv` | Method, sample/feature counts, bootstrap success, and PC1 variance or sPLS training correlation |
+| `_bootstrap.tsv` | sPLS resampling settings, success, and error details |
+| `_model.rds` | Construction metadata, training IDs, and weights |
+
+**Reuse the full `_weights.tsv` file for both microbiome and phenomic models.** The loader requires the complete saved feature set, including zero-weight rows, even with `"none"`. Zero-weight reference taxa are also needed to reproduce CLR and relative abundance. The selected-only table is for interpretation. Saved centres/scales are reused; reordered columns are matched by name, extra columns are ignored, and missing reference taxa cause an error.
+
+GWAS outputs are organised into project/model/ploidy directories containing association scores and effects, threshold-specific result tables, phenotype summaries, and Manhattan/QQ plots. Empty output directories are removed. Reusing project and trait names can overwrite outputs; use distinct prefixes for distinct analyses.
+
+## Compatibility and implementation notes
+
+- Use the existing `metag_data_species` and `microbial_*` controls for both microbiome and compatible phenomic feature tables. No `phenomic_*` argument aliases are currently implemented. Leave `alternate_trait`, `trait_microbial_proxy`, `pheno_taxa_species`, and `pheno_taxa_strain` as `NULL` when using them. Legacy names remain available for existing workflows.
+- Keep `covariate_metag = FALSE` for the new feature-derived outcome workflow, including phenomic inputs. The legacy adjustment mode changes the response by fitting a microbiome model; it is not merely an input-file switch.
+- Examples use `method = "MLM"`. The legacy `"GLM"` branch modifies the supplied kinship and should not be interpreted as a conventional no-kinship GLM. LOCO rebuilds kinship; use it with MLM.
+- `model_effect` selects diploid additive/dominance families. The higher-ploidy branches currently use predefined model sets.
+- Numeric phenotype covariates can be given as a vector or comma-separated string. Missing values use mice imputation; the current engine also sets the genotype-PC count from the number of added covariates.
+- `fdr` and `bonferroni` control threshold lines in plots; the corresponding tables are still calculated when the switches are `FALSE`. `suggestive` is a −log10(p) cutoff applied after an initial FDR 0.5 candidate filter. `perm >= 100` activates permutation thresholds.
+- `cores` controls GWASpoly parallelism, not the sPLS bootstrap loop.
+- If R reports unused `microbial_*` arguments, source the updated `R/systemsGWAS.R` rather than an earlier copy.
+
+### Validation status
+
+The microbial-composite update passed 27 targeted synthetic checks, including real mixOmics fits, five-candidate behaviour, numeric abundance preservation, sample-ID alignment, missing-response handling, reproducibility, saved-weight application, and the GWAS input handoff. The validation used 80 samples and 16 species. It did not include a complete GWASpoly scan, downstream plotting, Windows execution, or validation on a biological dataset.
+
+## Roadmap
+
+The following are development directions, not current native model capabilities or committed release dates:
+
+- Joint multi-trait association models.
+- Multi-environment, stability, plasticity, and G×E association models.
+- Dedicated constructors for additional latent phenotypes, including the proposed Developmental Blueprint Index (DBI).
+- Native signed-feature input, explicit multi-block weighting, and broader integration of transcriptomic, metabolomic, phenomic, environmental, and management data beyond the compatible numeric-table workflow described above.
+- User-defined kernels and links to crop systems models such as APSIM.
+
+Externally prepared numeric traits can already be supplied through `phenofile`; this is distinct from implementing a dedicated model or constructor for each data type.
+
+## Citation and contributing
+
+A methodological publication will be added when available. Until then, cite this repository and record the commit used, together with the R and package versions for your analysis. Also cite the relevant underlying methods and packages, including [GWASpoly](https://jendelman.github.io/GWASpoly/GWASpoly.html), [AGHmatrix](https://cran.r-project.org/package=AGHmatrix), and [mixOmics](https://mixomics.org/) where used.
+
+Bug reports, feature requests, and pull requests are welcome through [GitHub Issues](https://github.com/bodeolukolu/systemsGWAS/issues). For a reproducible report, include the call, error/traceback, `sessionInfo()`, and a small example that preserves the relevant input structure.
+
+## Contact
+
+**Dr. Bode A. Olukolu**  
+Science Leader – Crop Genetics  
+Department of Primary Industries, Queensland, Australia  
+Email: [bolukolu@utk.edu](mailto:bolukolu@utk.edu)
+
+## License
+
+Apache License 2.0. See the [Apache License 2.0 text](https://www.apache.org/licenses/LICENSE-2.0).

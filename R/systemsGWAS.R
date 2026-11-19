@@ -1,6 +1,287 @@
 #!/usr/bin/env Rscript
+# systemsGWAS: microbial trait construction and genome-wide association.
 
-systemsGWAS <- function(
+# Microbial phenotype construction. All selection and scoring uses sample IDs.
+.sgwas_names <- function(x) {
+  if(is.null(x)) return(NULL)
+  x <- trimws(unlist(strsplit(as.character(x),",",fixed=TRUE),use.names=FALSE))
+  x <- unique(x[!is.na(x) & nzchar(x) & x != "NULL"])
+  if(length(x)) x else NULL
+}
+
+.sgwas_numeric <- function(x,label) {
+  y <- suppressWarnings(as.numeric(as.character(x)))
+  if(any(is.na(y) & !is.na(x) & nzchar(trimws(as.character(x)))))
+    stop("Non-numeric values in ",label,call.=FALSE)
+  y
+}
+
+.sgwas_read_microbiome <- function(file) {
+  d <- read.delim(file,check.names=FALSE,stringsAsFactors=FALSE,colClasses="character")
+  if(ncol(d)<2L || !nrow(d) || anyDuplicated(names(d)))
+    stop("Microbiome input needs unique column names and at least one feature/sample")
+  sample_key <- intersect(c("Plant_ID","SampleID","Sample_ID","Taxa"),names(d))
+  feature_key <- intersect(c("species","Species","Feature","feature","strain","Strain"),names(d))
+  if(length(sample_key)) {
+    key <- sample_key[1L]; ids <- trimws(as.character(d[[key]]))
+    cols <- setdiff(names(d),key)
+    X <- as.matrix(as.data.frame(lapply(cols,function(nm) .sgwas_numeric(d[[nm]],nm))))
+    dimnames(X) <- list(ids,cols)
+  } else if(length(feature_key)) {
+    key <- feature_key[1L]; features <- trimws(as.character(d[[key]]))
+    metadata <- c("species","strain","genus","family","order","class","phylum",
+                  "kingdom","domain","tax_id","taxid","taxonomy","feature")
+    cols <- names(d)[!tolower(names(d)) %in% metadata]
+    if(!length(cols)) stop("No sample abundance columns in microbiome input")
+    values <- as.matrix(as.data.frame(lapply(cols,function(nm) .sgwas_numeric(d[[nm]],nm))))
+    X <- t(values); dimnames(X) <- list(cols,features)
+  } else stop("Microbiome input needs a species/Feature column (features in rows) or Plant_ID/SampleID/Taxa column (samples in rows)")
+  if(anyNA(rownames(X)) || anyNA(colnames(X)) || any(!nzchar(rownames(X))) ||
+     any(!nzchar(colnames(X))) || anyDuplicated(rownames(X)) || anyDuplicated(colnames(X)))
+    stop("Microbiome sample IDs and feature names must be nonempty and unique")
+  storage.mode(X) <- "double"
+  if(any(!is.finite(X)) || any(X<0))
+    stop("Microbiome abundances must be finite, nonnegative numbers; use zero for measured absence, not missing measurements")
+  X
+}
+
+.sgwas_select_features <- function(features, available) {
+  selectors <- .sgwas_names(features)
+  if(is.null(selectors)) stop("Supply microbial_features: exact names, a prefix ending in *, Genus_spp, or all")
+  if(identical(selectors,"all")) return(available)
+  selected <- character()
+  for(s in selectors) {
+    if(grepl("(_spp| spp)$",s)) {
+      prefix <- sub("(_spp| spp)$","",s)
+      hit <- available[startsWith(available,paste0(prefix,"_")) | startsWith(available,paste0(prefix," "))]
+    } else if(endsWith(s,"*")) {
+      prefix <- substr(s,1L,nchar(s)-1L)
+      if(!nzchar(prefix)) stop("Use all to select the complete microbiome")
+      hit <- available[startsWith(available,prefix)]
+    } else hit <- intersect(s,available)
+    if(!length(hit)) stop("No microbiome features match: ",s)
+    selected <- union(selected,hit)
+  }
+  available[available %in% selected]
+}
+
+.sgwas_transform <- function(X,method,pseudocount) {
+  if(method=="none") return(X)
+  if(method=="log1p") return(log1p(X))
+  total <- rowSums(X)
+  if(any(total<=0)) stop("CLR/relative transformation requires a positive total abundance in every sample")
+  relative <- X/total
+  if(method=="relative") return(relative)
+  if(method=="clr") {
+    # Close to proportions before adding the pseudocount. Reference columns
+    # are fixed in the exported weights, including zero-weight reference taxa.
+    logx <- log(relative+pseudocount)
+    return(logx-rowMeans(logx))
+  }
+  stop("Unknown microbial transformation: ",method)
+}
+
+.sgwas_phenotypes <- function(file) {
+  if(is.null(file)) return(NULL)
+  d <- read.delim(file,check.names=FALSE,stringsAsFactors=FALSE,colClasses="character")
+  if(ncol(d)<2 || anyDuplicated(names(d))) stop("Phenotype table needs unique trait columns and an ID column")
+  names(d)[1L] <- "Plant_ID"
+  d$Plant_ID <- trimws(as.character(d$Plant_ID))
+  if(anyNA(d$Plant_ID) || any(!nzchar(d$Plant_ID))) stop("Phenotype IDs cannot be missing/blank")
+  d
+}
+
+.sgwas_id_values <- function(d,column,ids) {
+  if(is.null(d) || !column %in% names(d)) stop("Phenotype column not found: ",column)
+  values <- .sgwas_numeric(d[[column]],column)
+  groups <- split(values,d$Plant_ID)
+  means <- vapply(groups,function(x) {x <- x[is.finite(x)];if(length(x)) mean(x) else NA_real_},numeric(1))
+  unname(means[match(ids,names(means))])
+}
+
+.sgwas_load_weights <- function(file) {
+  w <- read.delim(file,check.names=FALSE,stringsAsFactors=FALSE)
+  required <- c("Feature","Weight","Center","Scale","Transform","Pseudocount","ReferenceSetSize")
+  if(!all(required %in% names(w)) || !nrow(w))
+    stop("microbial_weights must be a complete *_weights.tsv exported by this pipeline")
+  if(anyNA(w$Feature) || any(!nzchar(w$Feature)) || anyDuplicated(w$Feature)) stop("Weight features must be unique")
+  for(nm in c("Weight","Center","Scale","Pseudocount","ReferenceSetSize")) w[[nm]] <- .sgwas_numeric(w[[nm]],nm)
+  if(any(!is.finite(as.matrix(w[c("Weight","Center","Scale","Pseudocount","ReferenceSetSize")])))) stop("Weight metadata must be finite")
+  if(any(w$Scale<=0) || !any(w$Weight!=0) || length(unique(w$Transform))!=1L ||
+     length(unique(w$Pseudocount))!=1L || any(w$Pseudocount<=0)) stop("Invalid transformation or scaling in weights")
+  if(any(w$ReferenceSetSize!=nrow(w))) stop("Incomplete weights table: use the full *_weights.tsv, not *_selected_weights.tsv")
+  w
+}
+
+# Public preparation helper, also called automatically by systemsGWAS().
+# The score is sum_j Weight_j * (transformed_abundance_j - Center_j) / Scale_j.
+systemsGWAS_prepare_microbiome <- function(
+    microbiome_file, features="all", method="auto", response=NULL, phenofile=NULL,
+    weights_file=NULL, trait_name="Microbial_composite", transform="auto",
+    prevalence=0.05, bootstraps=100L, stability=0.60, seed=123L,
+    pseudocount=1e-6, outdir="microbial_traits", covariates=NULL) {
+  method <- match.arg(tolower(method),c("auto","single","sum","pc1","spls","weighted"))
+  transform <- match.arg(tolower(transform),c("auto","none","relative","clr","log1p"))
+  if(length(trait_name)!=1L || is.na(trait_name) || !grepl("^[A-Za-z][A-Za-z0-9_]*$",trait_name) || trait_name=="Plant_ID")
+    stop("microbial_trait_name must start with a letter and contain only letters, digits and underscores")
+  check_fraction <- function(x,name) if(length(x)!=1 || !is.numeric(x) || !is.finite(x) || x<0 || x>1) stop(name," must be between 0 and 1")
+  check_fraction(prevalence,"microbial_prevalence");check_fraction(stability,"microbial_stability")
+  if(length(bootstraps)!=1L || !is.numeric(bootstraps) || !is.finite(bootstraps) || bootstraps<1 || bootstraps!=floor(bootstraps)) stop("microbial_bootstraps must be a positive integer")
+  if(length(seed)!=1L || !is.numeric(seed) || !is.finite(seed) || seed<0 || seed>.Machine$integer.max || seed!=floor(seed)) stop("microbial_seed must be a nonnegative integer")
+  if(length(pseudocount)!=1L || !is.numeric(pseudocount) || !is.finite(pseudocount) || pseudocount<=0) stop("microbial_pseudocount must be positive")
+  covariates <- .sgwas_names(covariates)
+  if(trait_name %in% covariates) stop("The GWAS response cannot be its own covariate")
+  response <- .sgwas_names(response)
+  if(method=="spls" && length(response)!=1L) stop("sPLS requires one microbial_response phenotype column")
+  if(method!="spls" && length(response)) stop("microbial_response is used only with microbial_method = spls")
+  if(method=="weighted" && is.null(weights_file)) stop("weighted requires microbial_weights")
+  if(method!="weighted" && !is.null(weights_file)) stop("Set microbial_method = weighted to reuse microbial_weights")
+  X <- .sgwas_read_microbiome(microbiome_file)
+  ph <- if(method=="spls" || length(covariates)) .sgwas_phenotypes(phenofile) else NULL
+  ids <- rownames(X); train <- rep(TRUE,nrow(X)); Y <- NULL
+  variance_explained <- NA_real_; success <- 0L; bootstrap_log <- data.frame()
+  source_method <- method; source_response <- if(length(response)) response else ""
+  if(method=="weighted") {
+    w <- .sgwas_load_weights(weights_file)
+    absent <- setdiff(w$Feature,colnames(X))
+    if(length(absent)) stop("Microbiome input is missing saved reference features: ",paste(absent,collapse=", "))
+    X <- X[,w$Feature,drop=FALSE]
+    transform <- w$Transform[1];pseudocount <- w$Pseudocount[1]
+    source_method <- if("Method" %in% names(w)) as.character(w$Method[1]) else "weighted"
+    source_response <- if("Response" %in% names(w)) as.character(w$Response[1]) else ""
+    w$Selected <- w$Weight!=0
+    T <- .sgwas_transform(X,transform,pseudocount)
+  } else {
+    candidates <- .sgwas_select_features(features,colnames(X))
+    if(method=="auto") method <- if(length(candidates)==1L) "single" else "pc1"
+    if(method=="single" && length(candidates)!=1L) stop("single requires exactly one selected species")
+    if(method=="spls") {
+      Y <- .sgwas_id_values(ph,response,ids); train <- is.finite(Y)
+      if(sum(train)<5L || !is.finite(sd(Y[train])) || sd(Y[train])==0) stop("sPLS requires at least five observed training samples and a variable response")
+    }
+    frequency <- colMeans(X[train,candidates,drop=FALSE]>0)
+    candidates <- candidates[frequency>=prevalence]
+    if(!length(candidates)) stop("No requested features pass microbial_prevalence")
+    if(transform=="auto") transform <- if(method=="sum") "relative" else "clr"
+    if(method=="sum" && !transform %in% c("none","relative")) stop("sum requires microbial_transform = relative or none (sum abundances, not CLR values)")
+    T <- .sgwas_transform(X,transform,pseudocount)
+    w <- data.frame(Feature=colnames(X),Weight=0,Center=0,Scale=1,Selected=FALSE,
+                    Candidate=colnames(X) %in% candidates,Selection_Frequency=NA_real_,
+                    Transform=transform,Pseudocount=pseudocount,ReferenceSetSize=ncol(X),
+                    Method=method,Response=source_response,stringsAsFactors=FALSE)
+    if(method %in% c("single","sum")) w$Weight[match(candidates,w$Feature)] <- 1
+    else {
+      SD <- apply(T[train,candidates,drop=FALSE],2,sd)
+      candidates <- candidates[is.finite(SD) & SD>sqrt(.Machine$double.eps)]
+      if(!length(candidates)) stop("No variable microbial candidates remain after transformation")
+      centers <- colMeans(T[train,candidates,drop=FALSE]);scales <- apply(T[train,candidates,drop=FALSE],2,sd)
+      if(method=="pc1") {
+        fit <- prcomp(T[train,candidates,drop=FALSE],center=TRUE,scale.=TRUE)
+        loading <- fit$rotation[,1L]
+        if(loading[which.max(abs(loading))]<0) loading <- -loading
+        variance_explained <- fit$sdev[1]^2/sum(fit$sdev^2)
+        chosen <- candidates
+      } else {
+        # One species needs no sparse selection; 2-4 predictors remain below
+        # the five-candidate minimum for the multi-species bootstrap screen.
+        if(length(candidates)>1L && length(candidates)<5L)
+          stop("Bootstrap sPLS requires at least 5 variable candidate species after filtering; found ",length(candidates))
+        if(!requireNamespace("mixOmics",quietly=TRUE)) stop("Install mixOmics to construct an sPLS proxy")
+        had_seed <- exists(".Random.seed",envir=.GlobalEnv,inherits=FALSE)
+        if(had_seed) old_seed <- get(".Random.seed",envir=.GlobalEnv)
+        on.exit({if(had_seed) assign(".Random.seed",old_seed,envir=.GlobalEnv)
+          else if(exists(".Random.seed",envir=.GlobalEnv,inherits=FALSE)) rm(".Random.seed",envir=.GlobalEnv)},add=TRUE)
+        set.seed(as.integer(seed))
+        grid <- if(length(candidates)==1L) 1L else c(5L,10L,20L,30L,50L,100L,200L)
+        grid <- grid[grid<=length(candidates)]
+        counts <- setNames(integer(length(candidates)),candidates)
+        logs <- vector("list",as.integer(bootstraps)); Xtrain <- T[train,candidates,drop=FALSE];Ytrain <- Y[train]
+        for(b in seq_len(as.integer(bootstraps))) {
+          idx <- sample.int(nrow(Xtrain),nrow(Xtrain),replace=TRUE)
+          keep <- grid[sample.int(length(grid),1L)]
+          fit <- tryCatch({
+            if(sd(Ytrain[idx])==0 || any(apply(Xtrain[idx,,drop=FALSE],2,sd)==0)) stop("constant bootstrap response or predictor")
+            Xboot <- Xtrain[idx,,drop=FALSE]
+            # Resampling repeats biological IDs; mixOmics requires unique row names.
+            rownames(Xboot) <- NULL
+            mixOmics::spls(Xboot,matrix(Ytrain[idx],ncol=1),ncomp=1,keepX=keep,scale=TRUE,mode="regression")
+          },error=function(e)e)
+          selected <- character(); problem <- ""
+          if(inherits(fit,"error")) problem <- conditionMessage(fit)
+          else {
+            load <- fit$loadings$X[,1L]
+            if(length(load)!=length(candidates) || any(!is.finite(load))) problem <- "invalid bootstrap loadings"
+            else selected <- candidates[abs(load)>0]
+            if(!length(selected) && !nzchar(problem)) problem <- "no selected species"
+          }
+          if(!nzchar(problem)) {counts[selected] <- counts[selected]+1L;success <- success+1L}
+          logs[[b]] <- data.frame(Bootstrap=b,KeepX=keep,Success=!nzchar(problem),N_Selected=length(selected),Message=problem)
+        }
+        bootstrap_log <- do.call(rbind,logs)
+        if(!dir.exists(outdir) && !dir.create(outdir,recursive=TRUE)) stop("Cannot create microbial output directory")
+        write.table(bootstrap_log,file.path(outdir,paste0(trait_name,"_bootstrap.tsv")),
+                    sep="\t",quote=FALSE,row.names=FALSE,na="NA")
+        if(!success) stop("No successful sPLS bootstrap fits; see the saved bootstrap log")
+        if(success<bootstraps) message("[systemsGWAS] sPLS bootstraps succeeded: ",success,"/",bootstraps,
+                                       "; selection frequency uses all attempted bootstraps.")
+        proportions <- counts/as.integer(bootstraps)
+        w$Selection_Frequency[match(candidates,w$Feature)] <- proportions
+        chosen <- names(proportions)[proportions>=stability & counts>0]
+        if(!length(chosen)) stop("No species pass microbial_stability; inspect data or choose a lower threshold")
+        fit <- mixOmics::spls(T[train,chosen,drop=FALSE],matrix(Ytrain,ncol=1),ncomp=1,
+                              keepX=length(chosen),scale=TRUE,mode="regression")
+        loading <- fit$loadings$X[,1L];names(loading) <- chosen
+        if(any(!is.finite(loading))) stop("Non-finite final sPLS loadings")
+        component <- as.numeric(scale(T[train,chosen,drop=FALSE],center=centers[chosen],scale=scales[chosen]) %*% loading)
+        # Verify that exported weights reproduce the actual fitted X component.
+        if(!isTRUE(all.equal(component,as.numeric(fit$variates$X[,1L]),tolerance=1e-7)))
+          stop("sPLS score reconstruction does not match fitted component; check mixOmics version")
+        orientation <- cor(component,Ytrain,method="spearman")
+        if(is.finite(orientation) && orientation<0) loading <- -loading
+      }
+      ix <- match(chosen,w$Feature)
+      w$Weight[ix] <- loading;w$Center[ix] <- centers[chosen];w$Scale[ix] <- scales[chosen]
+    }
+    w$Selected <- w$Weight!=0;source_method <- method
+  }
+  Z <- sweep(sweep(T,2,w$Center,"-"),2,w$Scale,"/")
+  score <- as.numeric(Z %*% w$Weight)
+  if(any(!is.finite(score)) || !is.finite(sd(score)) || sd(score)==0) stop("The constructed microbial trait is non-finite or constant")
+  composite <- data.frame(Plant_ID=ids,Value=score,check.names=FALSE);names(composite)[2L] <- trait_name
+  gwas_pheno <- composite
+  for(nm in covariates) gwas_pheno[[nm]] <- .sgwas_id_values(ph,nm,ids)
+  # Export preparation separately from the phenotype table used by GWAS.
+  if(!dir.exists(outdir) && !dir.create(outdir,recursive=TRUE)) stop("Cannot create microbial output directory")
+  prefix <- file.path(outdir,trait_name)
+  paths <- c(composite=paste0(prefix,"_composite.tsv"),weights=paste0(prefix,"_weights.tsv"),
+             selected_weights=paste0(prefix,"_selected_weights.tsv"),
+             phenotype=paste0(prefix,"_gwas_phenotypes.tsv"),summary=paste0(prefix,"_summary.tsv"),
+             model=paste0(prefix,"_model.rds"))
+  write_tsv <- function(d,p) write.table(d,p,sep="\t",quote=FALSE,row.names=FALSE,na="NA")
+  write_tsv(composite,paths['composite']);write_tsv(w,paths['weights'])
+  write_tsv(w[w$Selected,,drop=FALSE],paths['selected_weights']);write_tsv(gwas_pheno,paths['phenotype'])
+  if(nrow(bootstrap_log)) {
+    paths <- c(paths,bootstrap=paste0(prefix,"_bootstrap.tsv"));write_tsv(bootstrap_log,paths['bootstrap'])
+  }
+  summary <- data.frame(Trait=trait_name,Method=method,Source_Method=source_method,
+                        Response=source_response,Transform=transform,N_Samples=nrow(X),
+                        N_Training=if(method=="weighted") NA_integer_ else sum(train),
+                        N_Reference=ncol(X),N_Selected=sum(w$Selected),
+                        Bootstrap_Attempts=if(method=="spls") as.integer(bootstraps) else 0L,
+                        Bootstrap_Successes=success,Stability=if(method=="spls") stability else NA_real_,
+                        PC1_Variance_Explained=variance_explained,
+                        Training_Spearman=if(method=="spls") cor(score[train],Y[train],method="spearman") else NA_real_)
+  write_tsv(summary,paths['summary'])
+  model <- list(weights=w,summary=summary,training_ids=if(method=="weighted") NULL else ids[train],
+                requested_features=features,prevalence=prevalence,seed=seed,
+                score_formula="sum(Weight * (transformed abundance - Center) / Scale)",
+                mixOmics_version=if(method=="spls") as.character(utils::packageVersion("mixOmics")) else NULL)
+  saveRDS(model,paths['model'])
+  message("[systemsGWAS] Constructed ",trait_name," using ",method,": ",sum(w$Selected)," features; ",nrow(X)," samples. Outputs: ",outdir)
+  invisible(list(phenotype=gwas_pheno,weights=w,summary=summary,paths=paths,model=model))
+}
+
+.systemsGWAS_engine <- function(
     wdir = "./",
     projname = "GWAS",
     ploidy_levels = c(2,4,6,8),
@@ -36,24 +317,28 @@ systemsGWAS <- function(
       suppressPackageStartupMessages(library(p, character.only = TRUE))
     }
   }
-
+  
   # List of required packages
   pkgs <- c("GWASpoly", "qqplotr", "AGHmatrix", "corrplot", "ggcorrplot", "ggplot2",
             "plyr", "dplyr", "tidyr", "car", "MASS", "Hmisc", "data.table", "stringr",
             "heatmaply", "ppcor", "zoo", "GGally", "reshape2", "compositions",
             "sommer", "mice", "qvalue", "mixOmics")
-
+  
   # Call it once at the start of your function
   load_packages(pkgs)
-
+  
   #############################################################################################################################################################################
   # Specify parameters
   ####################
+  previous_wdir <- getwd()
+  on.exit(setwd(previous_wdir), add = TRUE)
+  wdir <- normalizePath(wdir, mustWork = TRUE)
+  input_path <- function(path) .sgwas_path(path, wdir)
   setwd(wdir)
   dir_prefix_name <- projname
   pop <- projname
   ploidy_levels <- as.numeric(ploidy_levels)
-  gwas_method <- strsplit(method, ",")
+  gwas_method <- .sgwas_names(method)
   maf <- as.numeric(maf)
   file_ploidy_2 <- genofile_2x
   file_ploidy_4 <- genofile_4x
@@ -61,16 +346,8 @@ systemsGWAS <- function(
   file_ploidy_8 <- genofile_8x
   phenotype_data <- phenofile
   alternate_trait=alternate_trait
-  if (is.null(covariate_pheno) || covariate_pheno == "NULL") {
-    covariatename <- NULL
-  } else {
-    covariatename <- unlist(strsplit(covariate_pheno, ","))
-  }
-  if (is.null(trait_microbial_proxy) || trait_microbial_proxy == "NULL") {
-    trait_microbial_proxy <- NULL
-  } else {
-    trait_microbial_proxy <- unlist(strsplit(trait_microbial_proxy, ","))
-  }
+  covariatename <- .sgwas_names(covariate_pheno)
+  trait_microbial_proxy <- .sgwas_names(trait_microbial_proxy)
   covariate <- covariate_metag
   corr_coeff <- if(covariate_metag) "full" else NULL
   # Microbiome as phenotypes
@@ -79,7 +356,7 @@ systemsGWAS <- function(
   metagenome_data_strains <- metag_data_strains
   metagenome_data_species <- metag_data_species
   if (!is.null(model_effect)) {
-    model_effect <- strsplit(model_effect, ",")
+    model_effect <- .sgwas_names(model_effect)
     if ("Add" %in% model_effect && "Dom" %in% model_effect) {model <- "Add_Dom"}
     if ("Add" %in% model_effect && !("Dom" %in% model_effect)) {model <- "Add"}
     if (!("Add" %in% model_effect) && "Dom" %in% model_effect) {model <- "Add_Dom"}
@@ -92,8 +369,8 @@ systemsGWAS <- function(
   threshold_suggestive <- as.numeric(suggestive)
   permutations <- as.numeric(perm)
   cores <- as.numeric(cores)
-
-
+  
+  
   #############################################################################################################################################################################
   # Specify other variables for metagenome-based analysis
   ##################################################
@@ -107,13 +384,12 @@ systemsGWAS <- function(
   ######################
   diversity=TRUE                                         # TRUE (default) or FALSE
   biparental=TRUE                                        # Generates a QTL profile manhattan plots
-  cores=1                                                 # If running on Linux machine, increase number of cores to increase computational speed
   # To permutation test, number of test must be >= 100. If time is not a constraint, at least 1,000 test is suggested
   if ("2" %in% ploidy_levels) { Gmethod="VanRaden" }
   if ("4" %in% ploidy_levels) { Gmethod="VanRaden" }
   if ("6" %in% ploidy_levels) { Gmethod="VanRaden" }
   if ("8" %in% ploidy_levels) { Gmethod="VanRaden" }
-
+  
   #############################################################################################################################################################################
   if (!is.null(trait_names) == (!is.null(taxa_strain) || !is.null(taxa_species))) {
     print("Please provide <trait names> or <taxa names>. YOu can't provide both")
@@ -123,9 +399,9 @@ systemsGWAS <- function(
         metag <- NULL
         if(covariate == TRUE) {no_covariate <- FALSE}
         if(covariate == FALSE) {no_covariate <- TRUE}
-        if(!is.null(metagenome_data_species)) {metag <- read.table(metagenome_data_species, header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)}
-        if(!is.null(metagenome_data_species)) {metag <- read.table(metagenome_data_species, header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)}
-
+        if(!is.null(metagenome_data_strains)) {metag <- read.table(input_path(metagenome_data_strains), header=TRUE, sep="\t", check.names=FALSE, stringsAsFactors=FALSE)}
+        if(!is.null(metagenome_data_species)) {metag <- read.table(input_path(metagenome_data_species), header=TRUE, sep="\t", check.names=FALSE, stringsAsFactors=FALSE)}
+        
         if (no_covariate == TRUE && is.null(covariatename) && !is.null(trait_names)) { dir1 <- paste(dir_prefix_name,"_pheno_Mnocov_",ploidy,"x_", gwas_method,  sep="") } else {dir1 <- NULL}
         if (no_covariate == TRUE && !is.null(covariatename) && !is.null(trait_names)) { dir2 <- paste(dir_prefix_name,"_pheno_Pcov_Mnocov_",ploidy,"x_", gwas_method,  sep="") } else {dir2 <- NULL}
         if (covariate == TRUE && is.null(covariatename) && !is.null(metagenome_data_strains) && !is.null(trait_names) && is.null(taxa_strain)) { dir3 <- paste(dir_prefix_name,"_pheno_strain_Mcov_",ploidy,"x_", gwas_method,  sep="") } else {dir3 <- NULL}
@@ -141,7 +417,7 @@ systemsGWAS <- function(
         if (covariate == TRUE && !is.null(covariatename) && !is.null(metagenome_data_strains) && !is.null(taxa_strain) && is.null(trait_names)) { dir13 <- paste(dir_prefix_name,"Pcov_strain_Mcov_",ploidy,"x_", gwas_method,  sep="") } else {dir13 <- NULL}
         if (covariate == TRUE && !is.null(covariatename) && !is.null(metagenome_data_species) && !is.null(taxa_species) && is.null(trait_names)) { dir14 <- paste(dir_prefix_name,"Pcov_species_Mcov_",ploidy,"x_", gwas_method,  sep="") } else {dir14 <- NULL}
         dir_list <- c(dir1,dir2,dir3,dir4,dir5,dir6,dir7,dir8,dir9,dir10,dir11,dir12,dir13,dir14)
-
+        
         for(job in c(dir_list)) {
           dir.create(job)
           setwd(job)
@@ -154,22 +430,22 @@ systemsGWAS <- function(
           dir.create("qqplots")
           dir.create("manplots")
           dir.create("normal_distribution")
-
+          
           if(grepl("_strain_",job) && !grepl("_pheno_",job)) {taxa_level <- "strain"}
           if(grepl("_species_",job) && !grepl("_pheno_",job)) {taxa_level <- "species"}
           if(grepl("_pheno_",job)) {taxa_level <- "notaxa"}
-
+          
           if("2" %in% ploidy_levels && ploidy == 2){genotype_data <- file_ploidy_2}
           if("4" %in% ploidy_levels && ploidy == 4){genotype_data <- file_ploidy_4}
           if("6" %in% ploidy_levels && ploidy == 6){genotype_data <- file_ploidy_6}
           if("8" %in% ploidy_levels && ploidy == 8){genotype_data <- file_ploidy_8}
-
+          
           if(!is.null(metag) && covariate_metag == TRUE) {trait_associated_covariates <- TRUE} else {trait_associated_covariates <- FALSE}
           metagenome_data <- NULL
           if(grepl("_strain_",job)) {metagenome_data <- metagenome_data_strains}
           if(grepl("_species_",job)) {metagenome_data <- metagenome_data_species}
           if(grepl("pheno_nocov",job)) {metagenome_data <- NULL}
-
+          
           #############################################################################################################################################################################
           # organize and generate required files
           ######################################
@@ -183,7 +459,7 @@ systemsGWAS <- function(
             tmp[1:9,1:9]
             return(tmp)
           }
-          geno <- read.table(paste("../",genotype_data,sep=""), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
+          geno <- read.table(input_path(genotype_data), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
           geno <- geno %>%
             distinct(SNP, .keep_all = TRUE)
           taxa_all_list <- NULL
@@ -209,16 +485,17 @@ systemsGWAS <- function(
             # traits <- sqrt(traits[]+1)
             traits$Plant_ID <- rownames(traits)
             traits <- subset(traits, select=c(ncol(traits),1:(ncol(traits)-1)))
-            traits[, 2:ncol(traits)] <- sapply(traits[, 2:ncol(traits)], as.factor)
+            traits[, 2:ncol(traits)] <- lapply(traits[, 2:ncol(traits), drop=FALSE], function(x) .sgwas_numeric(x, "microbial abundance"))
             samples <- as.data.frame(colnames(geno[,-c(1:5)]))
             colnames(samples) <- "Plant_ID"
             traits <- merge(traits, samples, by="Plant_ID")
           }
           if (!is.null(metagenome_data)){traits_metag <- traits}
-
+          
           if (!is.null(phenotype_data)){
-            traits_pheno <- read.delim(paste("../",phenotype_data,sep=""), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
-            colnames(traits_pheno)[1] <- "Plant_ID"
+            traits_pheno <- .sgwas_phenotypes(input_path(phenotype_data))
+            for(nm in names(traits_pheno)[-1L])
+              traits_pheno[[nm]] <- .sgwas_numeric(traits_pheno[[nm]],nm)
             all_traits_pheno <- colnames(traits_pheno)[2:ncol(traits_pheno)]
             for (i in 2:ncol(traits_pheno)){
               tiff(paste("./normal_distribution/",colnames(traits_pheno)[i],".tiff",sep=""), width=5, height=5, units = 'in', res = 300, compression = 'lzw')
@@ -233,38 +510,32 @@ systemsGWAS <- function(
               traits <- merge(traits_pheno, samples, by="Plant_ID")
             }
           }
-          names(traits) <- sub(".x$", "", names(traits))
-          names(traits) <- sub(".y$", "", names(traits))
-          traits_hold <- traits[,c(1,2)]; traits_hold[,2] <- as.numeric(traits_hold[,2])
-          traits_hold <- aggregate(traits_hold[,2],by=list(name=traits_hold$Plant_ID),data=traits_hold,FUN=mean)
-          colnames(traits_hold) <- colnames(traits)[c(1,2)]
-          if(ncol(traits) > 2){
-            for(i in c(3:ncol(traits))){
-              traits_holdtrans <- traits[,c(1,i)]; traits_holdtrans[,2] <- as.numeric(traits_holdtrans[,2])
-              traits_holdtrans <- aggregate(traits_holdtrans[,2],by=list(name=traits_holdtrans$Plant_ID),data=traits_holdtrans,FUN=mean)
-              colnames(traits_holdtrans) <- colnames(traits)[c(1,i)]
-              traits_hold <- merge(traits_hold, traits_holdtrans, by="Plant_ID")
-            }
-          }
+          names(traits) <- sub("\\.x$", "", names(traits))
+          names(traits) <- sub("\\.y$", "", names(traits))
+          # Aggregate duplicate IDs per column without dropping samples merely
+          # because another trait/covariate is missing.
+          traits_hold <- data.frame(Plant_ID=unique(as.character(traits$Plant_ID)))
+          for(nm in names(traits)[-1L])
+            traits_hold[[nm]] <- .sgwas_id_values(traits,nm,traits_hold$Plant_ID)
           traits <- traits_hold
-          names(traits) <- sub(".x$", "", names(traits))
-          names(traits) <- sub(".y$", "", names(traits))
+          names(traits) <- sub("\\.x$", "", names(traits))
+          names(traits) <- sub("\\.y$", "", names(traits))
           traits <- traits[, !duplicated(colnames(traits))]
           write.csv(traits, "traits.csv", row.names=F, quote = FALSE)
-
-
+          
+          
           #############################################################################################################################################################################
           # Perform Genome-Wide Association Analysis
           ##########################################
-          traits <- read.csv("traits.csv", header=T, sep=",", check.names=FALSE,stringsAsFactors=FALSE)
-
+          traits <- read.csv("traits.csv", header=T, sep=",", check.names=FALSE, stringsAsFactors=FALSE, colClasses=c(Plant_ID="character"))
+          
           if (!is.null(taxa_level)){
             if(taxa_level == "notaxa") {taxa <- c(trait_names)}
             if(taxa_level == "strain") {taxa <- c(taxa_strain)}
             if(taxa_level == "species") {taxa <- c(taxa_species)}
           }
           taxalist <- match(taxa,names(traits)); taxalist <- taxalist[!is.na(taxalist)]
-
+          
           for (j in c(taxalist)) {
             i <- names(traits)[j]
             pheno <- subset(traits, select=c(1,j))
@@ -307,9 +578,9 @@ systemsGWAS <- function(
               for (k in 1:ncol(metag_proxy)){
                 metag_proxy[,k] <- as.numeric(as.character(metag_proxy[,k]))
               }
-
+              
               assoc.proxy <- "NA"
-
+              
               if(trait_microbial_proxy[1] != "auto" && trait_microbial_proxy[1] != "auto-null"){
                 missing_taxa <- setdiff(trait_microbial_proxy, colnames(metag_proxy))
                 if(length(missing_taxa) > 0){
@@ -324,7 +595,7 @@ systemsGWAS <- function(
                   selected_taxa_weight <- as.data.frame(cbind(proxy_trait = overlapping_taxa, value.var = 1))
                 }
               }
-
+              
               if(trait_microbial_proxy[1] == "auto" || length(overlapping_taxa) > 1){
                 set.seed(123)
                 if(trait_microbial_proxy[1] == "auto"){ X <- metag_proxy[, colnames(metag_proxy) != train_traitname, drop = FALSE]}
@@ -332,14 +603,23 @@ systemsGWAS <- function(
                 Y <- metag_proxy[, train_traitname, drop = FALSE]
                 Y_vec <- as.numeric(as.matrix(Y)[,1])
                 n_boot <- 100
-                keepX_candidates <- c(10,20,30,50,100,200)
+                # This bootstrap screen requires at least five candidate predictors.
+                # Single-taxon proxies are handled directly in the branch above.
+                keepX_candidates <- c(5L,10L,20L,30L,50L,100L,200L)
                 keepX_candidates <- keepX_candidates[keepX_candidates <= ncol(X)]
+                if(length(keepX_candidates) == 0L){
+                  stop(paste0(train_traitname, "\tFAILED: bootstrap sPLS requires at least 5 candidate species/predictors after filtering; found ",
+                              ncol(X), "."))
+                }
                 boot_selected <- vector("list", n_boot)
                 for(b in seq_len(n_boot)){
                   idx <- sample(seq_len(nrow(X)), replace = TRUE)
                   Xb <- X[idx, , drop = FALSE]
                   Yb <- Y[idx, , drop = FALSE]
-                  fit <- try(mixOmics::spls(X = Xb, Y = Yb, ncomp = 1, keepX = sample(keepX_candidates, 1)), silent = FALSE)
+                  rownames(Xb) <- NULL; rownames(Yb) <- NULL
+                  # Sample an index: sample(5L, 1) would draw from 1:5,
+                  # rather than choose the sole allowed keepX value of five.
+                  fit <- try(mixOmics::spls(X = Xb, Y = Yb, ncomp = 1, keepX = keepX_candidates[sample.int(length(keepX_candidates), 1L)]), silent = FALSE)
                   if(inherits(fit, "try-error")) next
                   tmp <- try(selectVar(fit, comp = 1)$X$value, silent = TRUE)
                   if(inherits(tmp, "try-error") || is.null(tmp) || nrow(tmp) == 0) next
@@ -357,16 +637,16 @@ systemsGWAS <- function(
                 proxy_trait <- spls_model$variates$X[,1]
                 r <- cor(proxy_trait, Y_vec, method = "spearman", use = "complete.obs")
                 if(!is.na(r) && r < 0){proxy_trait <- -proxy_trait
-                  spls_model$variates$X[,1] <- -spls_model$variates$X[,1]
-                  spls_model$loadings$X[,1] <- -spls_model$loadings$X[,1]
+                spls_model$variates$X[,1] <- -spls_model$variates$X[,1]
+                spls_model$loadings$X[,1] <- -spls_model$loadings$X[,1]
                 }
                 pheno <- data.frame(proxy_trait = proxy_trait)
                 tmp <- selectVar(spls_model, comp = 1)$X$value
                 selected_taxa_weight <- data.frame(proxy_trait = rownames(tmp), weight = tmp[,1], row.names = NULL)
                 select_proxy_taxa <- selected_taxa_weight$proxy_trait
               }
-
-
+              
+              
               if(trait_microbial_proxy[1] == "auto-null"){
                 set.seed(234)
                 X <- as.matrix(metag_proxy[, colnames(metag_proxy) != train_traitname , drop = FALSE])
@@ -377,13 +657,13 @@ systemsGWAS <- function(
                 pheno <- data.frame(proxy_null_trait = pcs_rot[, 1])
                 selected_taxa_weight <- as.data.frame(cbind(proxy_trait = "full_microbiome", value.var = 0))
               }
-
-
+              
+              
               shared_samples <- intersect(traits[,1], row.names(pheno))
               pheno <- pheno[row.names(pheno) %in% shared_samples, , drop = FALSE]
               pheno <- as.data.frame(pheno)
               pheno <- pheno[, colnames(pheno) != train_traitname , drop = FALSE]
-
+              
               comp1_perc <- "NA"
               if(ncol(pheno) == 1){
                 pheno <- data.frame(Plant_ID = rownames(pheno), pheno, check.names = FALSE)
@@ -403,7 +683,7 @@ systemsGWAS <- function(
                   colnames(pheno) <- c("Plant_ID", traitname)
                 }
               }
-
+              
               pheno_compPC1 <- merge(pheno_original, pheno, by = "Plant_ID")
               cor_trait_comp1 <- cor(pheno_compPC1[[2]], pheno_compPC1[[3]], method = "spearman", use = "complete.obs")
               if(is.null(taxa_prefix)){
@@ -413,12 +693,12 @@ systemsGWAS <- function(
               }
               write.table(selected_taxa_weight, file = out_file, sep = "\t", quote = FALSE, row.names = TRUE)
             }
-
-
+            
+            
             # Compute correlation coefficients or extract it from pre-computed correlations.
             if (trait_associated_covariates == TRUE &&  covariate_metag == TRUE) {
               if (grepl(".txt", corr_coeff)) {
-                tcorr <- read.table(paste("../",corr_coeff,sep=""), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
+                tcorr <- read.table(input_path(corr_coeff), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
                 tcorr <- subset(tcorr, tcorr[,1]==i)
                 tcorr <- subset(tcorr, abs(tcorr[,3]) <= maxcorr  & abs(tcorr[,3]) >= mincorr & tcorr[,4] <= pvalue)
                 rownames(tcorr) <- tcorr[,2]; tcorr <- subset(tcorr, select=c(3,4)); colnames(tcorr)[1:2] <- c("tcorr","tpmat")
@@ -464,7 +744,7 @@ systemsGWAS <- function(
                   write.table(summout,paste("./correlations/",i,"_fit_multiple_regression_fit.txt",sep=""), row.names=T, quote = FALSE, sep="\t")
                 }
                 write.table(tcorr,paste("./correlations/",i,".txt",sep=""), row.names=T, quote = FALSE, sep="\t")
-
+                
                 rtcorr <- row.names(tcorr)
                 plotcor <- tdata[,c(rtcorr,i)]
                 plotcor <- plotcor %>% mutate_if(is.numeric, round, digits = 12)
@@ -526,7 +806,7 @@ systemsGWAS <- function(
               pheno <- merge(pheno, covariates, by=c("Plant_ID"))
               pheno <- subset(pheno, select=-c(Taxa))
             }
-
+            
             if (!is.null(covariatename)) {
               covariates <- traits[traits$Plant_ID %in% pheno$Plant_ID, ]
               covariates <- subset(covariates, select=c("Plant_ID",i,covariatename))
@@ -536,7 +816,7 @@ systemsGWAS <- function(
               pheno <- merge(pheno,covariates, by=c("Plant_ID"))
             }
             if (covariate == TRUE){pheno <- pheno[,-c(3:5)]}
-
+            
             # Run model with metagenome and generate residual
             if(metag_method == "Aitchison" && !is.null(metag) && covariate_metag == TRUE) {
               covariates <- traits[traits$Plant_ID %in% pheno$Plant_ID, ]
@@ -569,8 +849,8 @@ systemsGWAS <- function(
             } else {
               if(!is.null(trait_microbial_proxy)){ write.csv(pheno, paste0(names(traits)[j],"_",alternate_trait,"_proxy_pheno.csv"), row.names=F, quote = FALSE)}
             }
-
-            geno <- read.table(paste("../",genotype_data,sep=""), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
+            
+            geno <- read.table(input_path(genotype_data), header=T, sep="\t", check.names=FALSE,stringsAsFactors=FALSE)
             geno <- geno %>%
               distinct(SNP, .keep_all = TRUE)
             samples <- lapply(pheno[,1], as.character)
@@ -635,9 +915,9 @@ systemsGWAS <- function(
               dG$maf <- as.numeric(dG$min)/as.numeric(dG$sum)
               dG <- dG[dG$maf >= maf, ]
               geno <- dG[,-c((ncol(dG)-4):ncol(dG))]
-
+              
             }
-
+            
             pop_struc <- function() {
               pop_data <- subset(geno, select=-c(1:5))
               pop_data$no_missing <- apply(pop_data, MARGIN = 1, FUN = function(x) length(x[is.na(x)]) )
@@ -675,7 +955,7 @@ systemsGWAS <- function(
             # geno <- read.csv("geno.csv", header=T, sep=",", fill=TRUE, check.names=FALSE)
             G_matrix <- read.table(file=paste(pop,"_",Gmethod,"_",ploidy,"x.txt",sep=""), header=T, sep="\t", check.names=FALSE)
             if (tolower(gwas_method) == "glm") {G_matrix[G_matrix >= 0] <- 1}
-
+            
             data <- read.GWASpoly(ploidy=ploidy, pheno.file="pheno.csv", geno.file="geno.csv", format="numeric", n.traits=1, delim=",")
             Kinship <- set.K(data, K=as.matrix(G_matrix), LOCO=FALSE)
             if(LOCO == TRUE){Kinship <- set.K(data, LOCO = TRUE, n.core=cores)}
@@ -745,7 +1025,7 @@ systemsGWAS <- function(
               if(ncol(pheno) > 4){
                 params <- set.params(fixed=c(colnames(pheno)[3:5]), fixed.type=rep("numeric",3),n.PC=3,MAF=maf,geno.freq=0.99,P3D=TRUE)
               }
-
+              
               if ( ploidy == "2" ) {
                 if (model == "Add"){
                   GWAS.fitted <- GWASpoly(Kinship, models = c("additive"), n.core = cores, quiet = FALSE, params=params)
@@ -770,9 +1050,9 @@ systemsGWAS <- function(
                 models <- c("1-dom-ref","1-dom-alt","2-dom-ref","2-dom-alt","3-dom-ref","3-dom-alt","4-dom-ref","4-dom-alt","additive")
               }
             }
-
+            
             # qqplot(GWAS.fitted) + ggtitle(label="Q-Q plot")
-
+            
             SNP <- GWAS.fitted@map[["Marker"]]
             GWAS_logP<- data.frame(
               SNP = SNP,
@@ -785,7 +1065,7 @@ systemsGWAS <- function(
             rownames(GWAS_logP) <- GWAS_logP$SNP; GWAS_logP <- GWAS_logP[,-1]
             GWAS_logP <- cbind(SNP = rownames(GWAS_logP), GWAS_logP)
             colnames(GWAS_logP) <- gsub("^scores\\.", "", colnames(GWAS_logP))
-
+            
             if ( !is.null(GWAS_logP) ) {
               GWAS_effects <- GWAS.fitted@effects[[colnames(pheno[2])]]
               GWAS_effects$no_missing <- apply(GWAS_effects, MARGIN = 1, FUN = function(x) length(x[is.na(x)]) )
@@ -794,7 +1074,7 @@ systemsGWAS <- function(
               colnames(GWAS_effects) <- paste0(colnames(GWAS_effects), "_effects")
               GWAS_effects <- cbind(SNP = rownames(GWAS_effects), GWAS_effects)
               GWAS_scores_effects <- merge(GWAS_logP, GWAS_effects, by=c("SNP"))
-
+              
               geno_mat <- t(as.matrix(geno[ , -c(2:3)]))
               colnames(geno_mat) <- geno_mat[1,]; geno_mat <- geno_mat[-1,]
               geno_mat <- apply(geno_mat, 2, as.numeric)
@@ -820,7 +1100,7 @@ systemsGWAS <- function(
                   !is.finite(var_y) || var_y <= 0) {
                 stop("var_y must be a single positive finite value.")
               }
-
+              
               # GWASpoly normally imputes genotype data during import.
               # This fallback reproduces its general imputation behaviour:
               #   - fractional dosage data: marker mean
@@ -829,7 +1109,7 @@ systemsGWAS <- function(
                 if (all(is.na(x))) {
                   stop("A genotype column contains only missing values.")
                 }
-
+                
                 x[is.na(x)] <- mean(x, na.rm = TRUE)
                 x
               }
@@ -837,7 +1117,7 @@ systemsGWAS <- function(
                 if (all(is.na(x))) {
                   stop("A genotype column contains only missing values.")
                 }
-
+                
                 observed <- x[!is.na(x)]
                 mode_value <- as.numeric(names(which.max(table(observed))))
                 x[is.na(x)] <- mode_value
@@ -861,10 +1141,10 @@ systemsGWAS <- function(
                     impute_mode
                   )
                 }
-
+                
                 geno_mat_imputed <- as.matrix(geno_mat_imputed)
               }
-
+              
               # Match GWAS results to genotype columns once
               snp_index <- match(
                 GWAS_scores_effects$SNP,
@@ -879,12 +1159,12 @@ systemsGWAS <- function(
               calculate_pve <- function(effect, predictor_variance) {
                 pve <- (effect^2 * predictor_variance) / var_y
                 pve[!is.finite(pve)] <- NA_real_
-
+                
                 # Retained from the original code.
                 # Consider removing pmin() during diagnostics so values >1 are visible.
                 pmin(pve, 1)
               }
-
+              
               # ------------------------------------------------------------------
               # Additive PVE: predictor is alternate-allele dosage
               # ------------------------------------------------------------------
@@ -898,30 +1178,30 @@ systemsGWAS <- function(
                 effect = GWAS_scores_effects$additive_effects,
                 predictor_variance = v_add
               )
-
+              
               # ------------------------------------------------------------------
               # Dominance PVE: predictor is the model-specific binary coding
               # ------------------------------------------------------------------
               geno_dom <- round(geno_mat_imputed)
               max_dom <- ploidy %/% 2L
               for (d in seq_len(max_dom)) {
-
+                
                 alt_effect_col <- paste0(d, "-dom-alt_effects")
                 ref_effect_col <- paste0(d, "-dom-ref_effects")
-
+                
                 # GWASpoly d-dom-alt coding:
                 # 0 when alternate dosage < d
                 # 1 when alternate dosage >= d
                 dom_alt <- 1L * (geno_dom >= d)
-
+                
                 # GWASpoly d-dom-ref coding:
                 # 0 when alternate dosage <= ploidy - d
                 # 1 when alternate dosage >  ploidy - d
                 dom_ref <- 1L * (geno_dom > (ploidy - d))
-
+                
                 dom_alt_variance <- apply(dom_alt, 2, var)
                 dom_ref_variance <- apply(dom_ref, 2, var)
-
+                
                 if (alt_effect_col %in% colnames(GWAS_scores_effects)) {
                   GWAS_scores_effects[[paste0(d, "-dom-alt_PVE")]] <-
                     calculate_pve(
@@ -929,7 +1209,7 @@ systemsGWAS <- function(
                       predictor_variance = dom_alt_variance[snp_index]
                     )
                 }
-
+                
                 if (ref_effect_col %in% colnames(GWAS_scores_effects)) {
                   GWAS_scores_effects[[paste0(d, "-dom-ref_PVE")]] <-
                     calculate_pve(
@@ -938,12 +1218,12 @@ systemsGWAS <- function(
                     )
                 }
               }
-
-
+              
+              
               write.table(GWAS_scores_effects, file=paste("./scores_effects/","score_effects_",traitname,".txt",sep=""), row.names=F, quote = FALSE, sep = "\t")
               colnames(GWAS_logP) <- gsub("_scores", "", colnames(GWAS_logP)); GWAS_logP <- GWAS_logP[,-1]
               colnames(GWAS_effects) <- gsub("_effects", "", colnames(GWAS_effects)); GWAS_effects <- GWAS_effects[,-1]
-
+              
               pvalues <- as.data.frame(10^(-1 * as.data.frame(GWAS_logP)))
               score_models <- colnames(pvalues)
               if(ncol(pvalues) ==1 ){colnames(pvalues) <- score_models}
@@ -954,23 +1234,23 @@ systemsGWAS <- function(
               ps$observed <- -log10(ps$pvalue)
               ps$expected <- ps$model; ps$clower <- ps$model; ps$cupper <- ps$model
               ps$expected <- ps$clower <- ps$cupper <- rep(NA_real_, nrow(ps))
-
+              
               for (jj in score_models) {
                 count_df <- as.data.frame(table(ps$model))
                 count_sub <- subset(count_df, Var1 == jj)  # use count_sub here
-
+                
                 if (nrow(count_sub) == 0) next  # skip if no rows
-
+                
                 count <- count_sub[, 2]  # get the number of points
                 idx <- ps$model == jj
-
+                
                 ps$expected[idx] <- -log10(ppoints(count))
-
+                
                 p1 <- (1 - ci) / 2
                 p2 <- (1 + ci) / 2
                 shape1 <- 1:count
                 shape2 <- count:1
-
+                
                 ps$clower[idx] <- -log10(qbeta(p1, shape1, shape2))
                 ps$cupper[idx] <- -log10(qbeta(p2, shape1, shape2))
               }
@@ -986,8 +1266,8 @@ systemsGWAS <- function(
                 qqplot_metric <- rbind(qqplot_metric, qqplot_metric1)
               }
               write.table(qqplot_metric, file=paste("./qqplots/",traitname,"_qqplot_metric.txt",sep=""), row.names=F, quote = FALSE, sep = "\t")
-
-
+              
+              
               if (ploidy == 2) {
                 qqplot <- ggplot(ps, aes(x=expected, y=observed, group=model)) + facet_wrap(~model, ncol=1)+
                   geom_point(shape = 16, size = 2, colour="cornflowerblue") + scale_shape_identity()+
@@ -1028,7 +1308,7 @@ systemsGWAS <- function(
                   xlab(log10Pe) + ylab(log10Po) + labs(title=paste(traitname))
                 ggsave(file=paste("./qqplots/","QQplot_",traitname,"_fdr0.05.tiff",sep=""), plot=qqplot, width=4.5, height=16, units=("in"), dpi=120, compression = "lzw")
               }
-
+              
               # data_r2_fdr <- set.threshold(GWAS.fitted,method="FDR",level=0.05,n.core=cores)
               # SigQTL_r2_fdr <- fit.QTL(data_r2_fdr, trait=paste(traitname), qtl=qtl[,c("Marker","Model")])
               # if (is.null(SigQTL_r2_fdr) == "TRUE") {print ("file is empty")} else{
@@ -1056,7 +1336,7 @@ systemsGWAS <- function(
               #       write.table(SigQTL_r2_permute, paste("./sigpermute/","Significant_R2_",traitname,"_permute0.05.txt",sep=""), row.names=F, quote = FALSE, sep = "\t")
               #     }}
               # }
-
+              
               # --- Determine dominance terms based on ploidy ---
               get_dom_terms <- function(ploidy) {
                 # diploid (2): only 1 level of dominance
@@ -1077,7 +1357,7 @@ systemsGWAS <- function(
               # --- Build wide table ---
               GWAS_scores_effects_wide <- GWAS_scores_effects %>%
                 dplyr::select(SNP,MAF,additive_PVE,dplyr::all_of(dom_terms))
-
+              
               # --- Pivot longer ---
               GWAS_scores_effects_long <- GWAS_scores_effects_wide %>%
                 pivot_longer(
@@ -1094,7 +1374,7 @@ systemsGWAS <- function(
                     TRUE ~ Model
                   )
                 )
-
+              
               # GWAS_scores_effects_wide <- GWAS_scores_effects %>%
               #   select(SNP, MAF, additive_PVE, `1-dom-alt_PVE`, `1-dom-alt_PVE` = `1-dom-alt_PVE`)
               # GWAS_scores_effects_long <- GWAS_scores_effects_wide %>%
@@ -1115,7 +1395,7 @@ systemsGWAS <- function(
                 if (is.null(SigQTL_fdr) == "FALSE") {
                   write.table(SigQTL_fdr, paste("./sigFDR/","Significant_effect_",traitname,"_fdr0.05.txt",sep=""), row.names=F, quote = FALSE, sep = "\t")
                 }}
-
+              
               data_sugg <- set.threshold(GWAS.fitted,method="FDR",level=0.5,n.core=cores)
               data_sugg <- get.QTL(data_sugg)
               data_sugg <- subset(data_sugg, Score >= threshold_suggestive)
@@ -1124,7 +1404,7 @@ systemsGWAS <- function(
                 data_sugg <- merge(data_sugg, GWAS_scores_effects_long, by = c("Marker", "Model"))
               }
               write.table(data_sugg, paste("./sigSuggestive/","Significant_effect_",traitname,"_sugg",threshold_suggestive,".txt",sep=""), row.names=F, quote = FALSE, sep = "\t")
-
+              
               data_Bonferroni <- set.threshold(GWAS.fitted,method="Bonferroni",level=0.05,n.core=cores)
               SigQTL_Bonferroni <- get.QTL(data_Bonferroni)
               colnames(SigQTL_Bonferroni) <- gsub("^scores\\.", "", colnames(SigQTL_Bonferroni))
@@ -1135,7 +1415,7 @@ systemsGWAS <- function(
                 if (is.null(SigQTL_Bonferroni) == "FALSE") {
                   write.table(SigQTL_Bonferroni, paste("./sigBonferroni/","Significant_effect_",traitname,"_Bonferroni0.05.txt",sep=""), row.names=F, quote = FALSE, sep = "\t")
                 }}
-
+              
               # data_Meff <- set.threshold(GWAS.fitted,method="M.eff",level=0.05,n.core=cores)
               # SigQTL_Meff <- get.QTL(data_Meff)
               # if (is.null(SigQTL_Meff) == "TRUE") {print ("file is empty")} else{
@@ -1155,29 +1435,29 @@ systemsGWAS <- function(
                     write.table(SigQTL_permute, paste("./sigpermute/","Significant_effect_",traitname,"_permute0.05.txt",sep=""), row.names=F, quote = FALSE, sep = "\t")
                   }}
               }
-
+              
               scores <- GWAS.fitted@scores[[colnames(pheno[2])]]
               colnames(scores) <- gsub("^scores\\.", "", colnames(scores))
               scores <- setDT(scores, keep.rownames = TRUE)
               scores$Chrom <- gsub("_.+$", "", scores$rn); scores$bp <- gsub("^.+_", "", scores$rn); scores$rn <- NULL
               scores <- as.data.frame(reshape2::melt(scores, id=c("Chrom","bp"))); colnames(scores) <- c("Chrom","bp","models","scores")
               scores <-na.omit(scores); scores$scores <- as.numeric(as.character(scores$scores)); scores$bp <- as.numeric(as.character(scores$bp))
-
+              
               fdr_threshold <- t(data_fdr@threshold)
               fdr_threshold <- setDT(as.data.frame(fdr_threshold), keep.rownames = TRUE)
               colnames(fdr_threshold) <- c("model","threshold")
               hline.fdr <- data.frame(z1 = c(fdr_threshold$threshold), models = c(fdr_threshold$model))
-
+              
               Bonferroni_threshold <- t(data_Bonferroni@threshold)
               Bonferroni_threshold <- setDT(as.data.frame(Bonferroni_threshold), keep.rownames = TRUE)
               colnames(Bonferroni_threshold) <- c("model","threshold")
               hline.Bonferroni <- data.frame(z2 = c(Bonferroni_threshold$threshold), models = c(Bonferroni_threshold$model))
-
+              
               suggestive_threshold <- fdr_threshold
               suggestive_threshold$threshold <- rep(threshold_suggestive, nrow(suggestive_threshold))
               hline.suggestive <- data.frame(z1 = c(suggestive_threshold$threshold), models = c(suggestive_threshold$model))
-
-
+              
+              
               if (permutations >= 100) {
                 permute_threshold <- t(data_permute@threshold)
                 permute_threshold <- setDT(as.data.frame(permute_threshold), keep.rownames = TRUE)
@@ -1201,7 +1481,7 @@ systemsGWAS <- function(
                 mutate(Chrom = factor(Chrom, levels = unique(Chrom)),
                        Chrom_bp = interaction(Chrom, bp, sep = "_"))
               scores$Chrom <- factor(scores$Chrom, levels = sort(as.numeric(levels(scores$Chrom))))
-
+              
               # Create a dummy data frame for legend
               legend_df <- data.frame(x = 1:length(c("FDR", "Bonferroni", "Permutation", "Suggestive")),
                                       y = 1,  # dummy y, won't affect plot
@@ -1212,9 +1492,9 @@ systemsGWAS <- function(
               legend_df$value <- c(threshold_FDR, threshold_Bonferroni, threshold_permuted, threshold_suggested)
               legend_df <- subset(legend_df, value == TRUE)
               legend_df$threshold <- factor(legend_df$label, levels = legend_df$label)
-
-
-
+              
+              
+              
               if (ploidy == 2) {
                 if(model == "Add"){
                   dim=10
@@ -1459,7 +1739,7 @@ systemsGWAS <- function(
                   ggsave(file=paste("./manplots/","QTLprofile_",traitname,".tiff",sep=""), plot=manplot, width=30, height=50, units=("in"), dpi=300, compression = "lzw")
                 }
               }
-
+              
               hline.fdr <- NULL
               hline.Bonferroni <- NULL
               hline.permute <- NULL
@@ -1480,8 +1760,8 @@ systemsGWAS <- function(
       }
     }
   }
-
-
+  
+  
   # p <- read.table("./FER_GWAS_pheno_nocov_2x/pvalues/logPNI_2021.txt", sep="\t", head = TRUE)
   # for (i in c(1:ncol(p))){
   #   q <- qvalue(10^-(p[,i]))
@@ -1489,3 +1769,91 @@ systemsGWAS <- function(
   #   p[,paste(i)] <- q_value
   # }
 }
+
+
+# Resolve input paths once, before the GWAS engine changes directories.
+.sgwas_path <- function(path, base) {
+  if(is.null(path) || identical(path,"NULL")) return(NULL)
+  if(length(path)!=1L || !is.character(path) || is.na(path) || !nzchar(path))
+    stop("Expected one nonempty input file path")
+  if(!grepl("^(/|[A-Za-z]:[/\\\\]|~)",path)) path <- file.path(base,path)
+  normalizePath(path.expand(path),mustWork=TRUE)
+}
+
+# Public entry point. Legacy named arguments remain accepted; prefer
+# microbial_features + microbial_method for new microbial-phenotype analyses.
+systemsGWAS <- function(
+    wdir="./", projname="GWAS", ploidy_levels=c(2,4,6,8),
+    trait_names=c("trait1","trait2"), alternate_trait=NULL,
+    trait_microbial_proxy=c("NULL"), model_effect=c("Add","Dom"),
+    fdr=TRUE, bonferroni=TRUE, suggestive=5, perm=1, cores=1,
+    genofile_2x=NULL, genofile_4x=NULL, genofile_6x=NULL, genofile_8x=NULL,
+    phenofile=NULL, method=c("GLM","MLM"), covariate_pheno=NULL,
+    covariate_metag=FALSE, maf=0.02, LOCO=FALSE,
+    pheno_taxa_strain=NULL, pheno_taxa_species=NULL,
+    metag_data_strains=NULL, metag_data_species=NULL,
+    microbial_features=NULL, microbial_method="auto", microbial_response=NULL,
+    microbial_weights=NULL, microbial_trait_name="Microbial_composite",
+    microbial_transform="auto", microbial_prevalence=0.05,
+    microbial_bootstraps=100L, microbial_stability=0.60,
+    microbial_seed=123L, microbial_pseudocount=1e-6, run_gwas=TRUE) {
+  if(length(run_gwas)!=1L || !is.logical(run_gwas) || is.na(run_gwas))
+    stop("run_gwas must be TRUE or FALSE")
+  wdir <- normalizePath(wdir,mustWork=TRUE)
+  if(length(projname)!=1L || is.na(projname) || !grepl("^[A-Za-z0-9][A-Za-z0-9_.-]*$",projname))
+    stop("projname must be a simple project prefix (letters, digits, _, . or -)")
+  numeric_cores <- suppressWarnings(as.numeric(cores))
+  if(length(numeric_cores)!=1L || !is.finite(numeric_cores) || numeric_cores<1 || numeric_cores!=floor(numeric_cores))
+    stop("cores must be a positive integer")
+  new_mode <- length(.sgwas_names(microbial_features))>0L || length(.sgwas_names(microbial_weights))>0L
+  legacy_names <- names(formals(.systemsGWAS_engine))
+  args <- mget(legacy_names,envir=environment(),inherits=FALSE)
+  args$cores <- as.integer(numeric_cores)
+  prepared <- NULL
+  if(new_mode) {
+    if(length(.sgwas_names(trait_microbial_proxy)) || length(.sgwas_names(alternate_trait)) ||
+       length(.sgwas_names(pheno_taxa_species)) || length(.sgwas_names(pheno_taxa_strain)))
+      stop("Use microbial_features/microbial_method without the legacy proxy or pheno_taxa selectors")
+    if(!identical(covariate_metag,FALSE))
+      stop("Use covariate_metag = FALSE when mapping a constructed microbial phenotype")
+    if(is.null(.sgwas_names(metag_data_species))) stop("Supply metag_data_species for microbial phenotype construction")
+    # FER is read only for sPLS, or if a phenotype-table covariate is requested.
+    needs_pheno <- identical(tolower(microbial_method),"spls") || length(.sgwas_names(covariate_pheno))>0L
+    outdir <- file.path(wdir,paste0(projname,"_microbial_traits"))
+    prepared <- systemsGWAS_prepare_microbiome(
+      microbiome_file=.sgwas_path(metag_data_species,wdir), features=microbial_features,
+      method=microbial_method, response=microbial_response,
+      phenofile=if(needs_pheno) .sgwas_path(phenofile,wdir) else NULL,
+      weights_file=.sgwas_path(microbial_weights,wdir), trait_name=microbial_trait_name,
+      transform=microbial_transform, prevalence=microbial_prevalence,
+      bootstraps=microbial_bootstraps, stability=microbial_stability,
+      seed=microbial_seed, pseudocount=microbial_pseudocount,
+      outdir=outdir, covariates=covariate_pheno)
+    if(!run_gwas) return(invisible(prepared))
+    args$trait_names <- microbial_trait_name
+    args$phenofile <- normalizePath(prepared$paths[['phenotype']],mustWork=TRUE)
+    args[c('alternate_trait','trait_microbial_proxy','pheno_taxa_strain',
+           'pheno_taxa_species','metag_data_strains','metag_data_species')] <- rep(list(NULL),6L)
+    args$covariate_metag <- FALSE
+  } else {
+    if(!run_gwas) stop("run_gwas = FALSE requires microbial_features or microbial_weights")
+    if(!identical(microbial_method,"auto") || length(.sgwas_names(microbial_response)))
+      stop("Supply microbial_features (or microbial_weights) to activate microbial phenotype construction")
+  }
+  # Check genotype/phenotype inputs before the engine loads its GWAS packages.
+  ploidies <- suppressWarnings(as.numeric(ploidy_levels))
+  if(!length(ploidies) || anyNA(ploidies) || any(!ploidies %in% c(2,4,6,8)))
+    stop("ploidy_levels must contain 2, 4, 6 or 8")
+  for(p in ploidies) {
+    nm <- paste0('genofile_',p,'x')
+    if(is.null(.sgwas_names(args[[nm]]))) stop("Supply ",nm," for ploidy ",p)
+    args[[nm]] <- .sgwas_path(args[[nm]],wdir)
+  }
+  for(nm in c('phenofile','metag_data_species','metag_data_strains'))
+    args[[nm]] <- .sgwas_path(args[[nm]],wdir)
+  gwas_result <- do.call(.systemsGWAS_engine,args)
+  if(!is.null(prepared)) {prepared$gwas_result <- gwas_result;return(invisible(prepared))}
+  invisible(gwas_result)
+}
+
+
