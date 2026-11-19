@@ -1,46 +1,109 @@
 #!/usr/bin/env Rscript
+# Source the updated pipeline, then edit the input filenames below.
 
-# # List of required packages
-# pkgs <- c("AGHmatrix", "qqplotr", "ggplot2", "dplyr", "data.table", "stringr",
-#           "heatmaply", "ppcor", "zoo", "GGally", "reshape2", "compositions", "sommer", "mice", "qvalue")
-# # Install missing packages
-# for (p in pkgs) {
-#   if (!requireNamespace(p, quietly = TRUE)) {
-#     message("Installing package: ", p)
-#     install.packages(p, repos = "https://cloud.r-project.org")
-#   }
-# }
-# install.packages("remotes")
-# library("remotes")
-# remotes::install_github("jendelman/GWASpoly")
-
-
+# load systemsGWAS directly from  github
 systemsGWAS_url <- paste0("https://raw.githubusercontent.com/","bodeolukolu/systemsGWAS/main/R/systemsGWAS.R")
 tryCatch(source(systemsGWAS_url),error = function(e) {stop("Unable to source systemsGWAS.R: ", conditionMessage(e))})
 
-systemsGWAS (
-    wdir = "./",
-    projname = "GWAS",
-    ploidy_levels = c(2,4,6,8),
-    trait_names = c("trait1","trait2"),
-    alternate_trait=NULL,       # set to NULL if not available, Fusarium_verticillioides is causal pathogen for Fusarium Ear Rot
-    trait_microbial_proxy=c("auto"),                 # set to NULL if not available. List taxa (and Fusarium_spp or Fusarium spp, to capture multiple taxa starting with Fusarium). Use "auto" (sPLS_proxy) or "auto-null" (proxy-null)
-    model_effect = c("Add","Dom"),
-    fdr = TRUE,
-    bonferroni = TRUE,
-    suggestive = "5",                                # set to NULL if not available
-    perm = "1",
-    cores = "1",
-    genofile_2x = NULL,
-    genofile_4x = NULL,
-    genofile_6x = NULL,
-    genofile_8x = NULL,
-    phenofile = "traits.txt",                         # set to NULL if not available
-    method = c("MLM", "GLM"),
-    covariate_pheno = c("trait1","trait2"),           # set to NULL if not available
-    covariate_metag = FALSE,
-    maf = "0.02",
-    LOCO = FALSE,
-    metag_data_strains = "metag.txt",                 # set to NULL if not available
-    metag_data_species = "metag.txt"                  # set to NULL if not available
+# load systemsGWAS directory, if downloaded
+# source("systemsGWAS.R")
+
+systemsGWAS(
+  wdir = "./", 
+  projname = "Fusarium_PC1",
+
+  ploidy_levels = 2,
+  genofile_2x = "Zm_2x_rd6_maf0.02_dose.txt",
+  genofile_4x = NULL,
+  genofile_6x = NULL,
+  genofile_8x = NULL,
+
+  phenofile = NULL,
+  trait_names = NULL,
+
+  metag_data_species = "metag_species.tsv",
+  microbial_features = "Fusarium*",           # Exact species, vector of names, "Fusarium*", "Fusarium_spp", or "all".
+  microbial_method = "pc1",                   # "single", "sum", "PC1", "PC2", "PC3", or "spls" (specify only one at a time)
+  microbial_response = NULL,                  # specify phenotype spls uses e.g. "FER"
+  microbial_weights = NULL,                   # Full *_weights.tsv from an earlier run; method must be "weighted". Default: NULL.
+  microbial_trait_name = "composite_Fusarium_PC1",
+  microbial_transform = "auto",               # "none", "relative", "clr" or "log1p". Default "auto": relative for sum, clr otherwise.
+  microbial_prevalence = 0.05,
+  microbial_bootstraps = 100L,
+  microbial_stability = 0.60,
+  microbial_seed = 123L,
+  microbial_pseudocount = 1e-6,
+  run_gwas = TRUE,
+  method = "MLM",
+  model_effect = c("Add","Dom"),
+  covariate_pheno = NULL,
+  covariate_metag = FALSE,
+  maf = 0.02,
+  LOCO = FALSE,
+  cores = 5,
+  fdr = TRUE,
+  bonferroni = TRUE,
+  suggestive = 5,
+  perm = 1,
+  alternate_trait = NULL,
+  trait_microbial_proxy = NULL,
+  pheno_taxa_strain = NULL,
+  pheno_taxa_species = NULL,
+  metag_data_strains = NULL
+)
+
+
+
+systemsGWAS(
+  wdir = "./",
+  projname = "Fusarium_PC1",
+  
+  ploidy_levels = 2,
+  genofile_2x = "Zm_2x_rd6_maf0.02_dose.txt",
+
+  phenofile = NULL,
+  trait_names = NULL,
+
+  metag_data_species = "metag_species.tsv",
+  microbial_features = "Fusarium*",           # Exact species, vector of names, "Fusarium*", "Fusarium_spp", or "all".
+  microbial_method = "pc1",                   # "single", "sum", "PC1", "PC2", "PC3", or "spls" (specify only one at a time)
+  microbial_response = NULL,                  # specify phenotype spls uses e.g. "FER"
+  microbial_weights = NULL,                   # Full *_weights.tsv from an earlier run; method must be "weighted". Default: NULL.
+  microbial_trait_name = "composite_Fusarium_PC1",
+  microbial_transform = "auto",               # "none", "relative", "clr" or "log1p". Default "auto": relative for sum, clr otherwise.
+  microbial_prevalence = 0.05,
+  microbial_bootstraps = 100L,
+  microbial_stability = 0.60,
+  microbial_seed = 123L,
+  microbial_pseudocount = 1e-6,
+  run_gwas = TRUE,
+  
+  # INTEGRATED TRAIT + MICROBIAL/PHENOMIC ASSOCIATION
+  # "standard" (default): existing scans; "joint": two-trait mixed model;
+  # "interaction": SNP x microbial score; "both": run both, with matched baselines.
+  # New modes require phenofile + trait_names and one constructed microbial score.
+  # Use method="MLM", model_effect="Add", covariate_metag=FALSE below.
+  association_mode = "standard",             # "standard", "joint", "interaction", "both": joint & interaction (using any of microbial_method)
+  association_n_pcs = 0L,
+  association_max_missing = 0.20,
+  association_chunk_size = 256L,
+  association_maxit = 300L,
+  
+  method = "MLM",
+  model_effect = c("Add","Dom"),
+  covariate_pheno = NULL,
+  covariate_metag = FALSE,
+  maf = 0.02,
+  LOCO = FALSE,
+  cores = 3,
+  fdr = TRUE,
+  bonferroni = TRUE,
+  suggestive = 5,
+  perm = 1,
+  
+  alternate_trait = NULL,
+  trait_microbial_proxy = NULL,
+  pheno_taxa_strain = NULL,
+  pheno_taxa_species = NULL,
+  metag_data_strains = NULL
 )
