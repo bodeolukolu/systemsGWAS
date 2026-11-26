@@ -36,13 +36,14 @@ systemsGWAS(
   # INTEGRATED TRAIT + MICROBIAL/PHENOMIC ASSOCIATION
   # "gwaspoly-marginal": single trait scan
   # "sgwas-marginal" (default):single trait scan
-  # `sgwas-multitrait`: two or more traits
+  # "sgwas-env": environmental GWAS. Run with LOCO = TRUE, association_n_pcs = 0L, and test env_deflate_pcs = 0, 1, and 2.
+  # "sgwas-multitrait": two or more traits
   # "sgwas-joint": two-trait mixed model
   # "sgwas-interaction": SNP x microbial score
   # "sgwas-all": run both, with matched baselines.
   # New modes require phenofile + trait_names and one constructed microbial score.
   # Use method="MLM", model_effect="Add", covariate_metag=FALSE below.
-  association_mode = "sgwas-marginal",             # "gwaspoly-marginal", "sgwas-marginal", "sgwas-joint", "sgwas-interaction", "sgwas-all"
+  association_mode = "sgwas-marginal",             # "gwaspoly-marginal", "sgwas-marginal", "sgwas-env", "sgwas-multitrait", "sgwas-joint", "sgwas-interaction", "sgwas-all"
   association_n_pcs = 0L,
   association_max_missing = 0.50,
   association_chunk_size = 256L,
@@ -54,7 +55,7 @@ systemsGWAS(
   multitrait_missing = "impute",                    # "impute" or "complete_case".
   multitrait_missing_threshold = 0.30,              # >30% overall OR in any trait: drop incomplete rows.
 
-  method = "MLM",
+  method = c("GLM","MLM"),
   model_effect = c("Add","Dom"),
   covariate_pheno = NULL,
   covariate_metag = FALSE,

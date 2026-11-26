@@ -2,17 +2,15 @@
   <img src="misc/systemsGWAS_logo.png" alt="systemsGWAS logo" width="620">
 </p>
 
-# systemsGWAS
+#### systemsGWAS
 
-**Genome-wide association analysis of measured phenotypes, microbiome and phenomic features, and composite biological traits.**
+**Genome-wide association analysis of measured phenotypes, environmental/geographic variables, microbiome and phenomic features, and composite biological traits.** 
 
-**systemsGWAS** is an R pipeline that combines marker dosage data with measured phenotypes or traits constructed from microbiome/metagenome and phenomic features, including numeric measurements extracted from hyperspectral or drone imagery. It supports joint multi-trait GWAS of two or more phenotype columns, GWAS of individual features, unsupervised composites, phenotype-informed sPLS proxies, joint measured-trait–feature-score association, and SNP × feature-score interactions. Phenomic feature tables can replace microbiome tables; microbiome and phenomic features can also be combined after source-specific preprocessing, with feature centring and scaling performed internally for PCA and sPLS.
+**systemsGWAS** is an R pipeline that combines marker dosage data with measured phenotypes, environmental variables, or traits constructed from microbiome/metagenome and phenomic features (including numeric measurements extracted from hyperspectral or drone imagery). It supports single-trait and structure-calibrated environmental GWAS (sgwas-env), joint multi-trait GWAS of two or more phenotype columns, GWAS of individual features, unsupervised composites, phenotype-informed sPLS proxies, joint measured-trait–feature-score association, and SNP × feature-score interactions. Phenomic feature tables can replace microbiome tables, or both can be combined after source-specific preprocessing, with feature centring and scaling performed internally for PCA and sPLS. 
 
-Legacy association analyses use **GWASpoly** and **AGHmatrix** (`gwaspoly-marginal`) for single-trait GWAS. Single-trait and integrated association analyses (`sgwas-marginal`, `sgwas-multitrait`, `sgwas-joint`, `sgwas-interaction`, `sgwas-all`) are implemented using a dedicated, high-speed Base-R spectral REML/GLS engine (**sgwas**) supporting additive and dosage-threshold dominance models across diploid, tetraploid, hexaploid, and octoploid dosage files (`2x`, `4x`, `6x`, `8x`).
+Legacy association analyses use **GWASpoly** and **AGHmatrix** (gwaspoly-marginal) for single-trait GWAS. Single-trait, environmental, and integrated association analyses (sgwas-marginal, sgwas-env, sgwas-multitrait, sgwas-joint, sgwas-interaction, sgwas-all) are implemented using a dedicated, high-speed Base-R spectral REML/GLS engine (**sgwas**) supporting both mixed linear models (MLM) and fixed-effect ordinary least squares (GLM), top-PC kinship deflation, genomic control calibration, and additive and dosage-threshold dominance models across diploid, tetraploid, hexaploid, and octoploid dosage files (2x, 4x, 6x, 8x). 
 
-The existing `metag_data_species` and `microbial_*` argument names are used for both microbiome and phenomic inputs. The pipeline reads extracted numeric features, not raw image files. See [phenomic input requirements](#phenomic-features-from-hyperspectral-or-drone-imaging) for transformations and the current nonnegative-input requirement.
-
-Formerly **multiomicGWAS**. The repository is now [bodeolukolu/systemsGWAS](https://github.com/bodeolukolu/systemsGWAS).
+The existing metag_data_species and microbial_* argument names are used for both microbiome and phenomic inputs. The pipeline reads extracted numeric features, not raw image files. See [phenomic input requirements](#phenomic-features-from-hyperspectral-or-drone-imaging) for transformations and the current nonnegative-input requirement. 
 
 ---
 
@@ -42,6 +40,8 @@ Current capabilities also include marker filtering, additive and dominance effec
 |---|---|---|
 | `Trait_marginal` | Is the SNP associated with the measured trait, analysing that trait alone? The microbial score is not included. | 1 |
 | `Microbial_marginal` | Is the SNP associated with the microbial score, analysing that score alone? The measured trait is not included. | 1 |
+| `sgwas-env` | Is the SNP associated with an environmental/geographic variable, using optional top-PC GRM deflation, `GLM`, and genomic control calibration to balance population-structure confounding? | 1 |
+| `sgwas-multitrait` | Are the SNP effects across all selected phenotypes jointly different from zero , alongside per-trait conditional and single-trait tests? | (omnibus) / 1 (per-trait) |
 | `Trait_joint` | Is the SNP’s measured-trait effect significant when the trait and microbial score are fitted together as two correlated outcomes? | 1 |
 | `Microbial_joint` | Is the SNP’s microbial-score effect significant in that same bivariate model? | 1 |
 | `Bivariate_joint` | Are the SNP effects on the measured trait and microbial score jointly different from zero? Either outcome or both can drive significance. | 2 |
@@ -192,6 +192,51 @@ systemsGWAS(
 
 To run the legacy **GWASpoly** engine instead, set `association_mode = "gwaspoly-marginal"`.
 
+---
+
+## Environmental GWAS (`sgwas-env`) and Integrated GLM Support
+
+Geographic and environmental traits (such as `Env_PC1`, `Env_PC2`, latitude, longitude, or elevation) often correlate strongly with macro-population structure. Standard mixed linear models (`MLM`) with a full genomic relationship matrix (`GRM`) can over-correct for this structure and mask true local-adaptation loci (false negatives), whereas omitting the GRM entirely (`GLM`) can inflate false positives.
+
+`systemsGWAS` addresses this trade-off with **`association_mode = "sgwas-env"`** and native **`method = "GLM"`** support in the base-R REML/GLS engine:
+
+### Key Features
+* **Top-PC GRM Deflation (`env_deflate_pcs`):** Removes the leading \(k\) genetic eigenvectors (which capture macro-geographic clines) from the GRM prior to REML variance estimation while retaining mid- and lower-order eigenvectors to control cryptic relatedness and family structure.
+* **Genomic Control Calibration (`env_gc = TRUE`):** Automatically computes the empirical genomic inflation factor (\(\lambda_{GC}\)) per trait and marker model and exports calibrated p-values (`P_Trait_GC`) and Benjamini–Hochberg/Storey FDR q-values (`P_Trait_GC_BH`) alongside uncalibrated statistics in `ASSOCIATIONS.tsv`.
+* **Integrated `GLM` Mode (`method = "GLM"`):** Runs fixed-effect Ordinary Least Squares (OLS) scans without a GRM inside the fast integrated engine (`sgwas-marginal`, `sgwas-env`, `sgwas-joint`, `sgwas-interaction`), optionally adjusting for fixed covariates (`covariate_pheno`) and leading genetic PCs (`association_n_pcs`).
+
+### Example Usage
+
+```r
+# 1. Recommended EnvGWAS: LOCO MLM with top 1 geographic eigenvector deflated + Genomic Control
+systemsGWAS(
+  wdir = "./",
+  projname = "Chickpea_EnvGWAS",
+  ploidy_levels = 2,
+  genofile_2x = "genotypes.tsv",
+  phenofile = "env_pcs.tsv",
+  trait_names = c("Env_PC1", "Env_PC2"),
+  association_mode = "sgwas-env",
+  method = "MLM",
+  LOCO = TRUE,
+  env_deflate_pcs = 1L,
+  env_gc = TRUE
+)
+
+# 2. Integrated GLM with fixed genetic PCs (no GRM)
+systemsGWAS(
+  wdir = "./",
+  projname = "Chickpea_EnvGLM",
+  ploidy_levels = 2,
+  genofile_2x = "genotypes.tsv",
+  phenofile = "env_pcs.tsv",
+  trait_names = c("Env_PC1", "Env_PC2"),
+  association_mode = "sgwas-env",
+  method = "GLM",
+  association_n_pcs = 2L,
+  env_gc = TRUE
+)
+```
 ---
 
 ## Multi-trait GWAS from phenofile
@@ -396,6 +441,10 @@ systemsGWAS(
 | `run_gwas` | `TRUE` | Set `FALSE` to construct/export a microbiome or phenomic outcome only |
 | `association_mode` | `"sgwas-marginal"` (auto-switches to `"sgwas-all"` with microbial features) | `"sgwas-marginal"`, `"gwaspoly-marginal"`, `"sgwas-joint"`, `"sgwas-interaction"`, `"sgwas-all"`, or `"sgwas-multitrait"` |
 | `model_effect` | `c("Add", "Dom")` (`"Add"` default in integrated modes if omitted) | Additive (`"Add"`) and/or dosage-threshold dominance (`"Dom"`) genetic models |
+| `method` | `c("GLM", "MLM")` (`"MLM"` default in `sgwas` modes) | Statistical model: mixed linear model with GRM (`"MLM"`) or fixed-effect OLS without GRM (`"GLM"`) |
+| `LOCO` | `FALSE` | Use leave-one-chromosome-out kinship matrices in `MLM` scans (`TRUE` recommended for `sgwas-env`) |
+| `env_deflate_pcs` | `0L` | Number of leading genetic eigenvectors to deflate from the GRM before REML fitting (prevents macro-structure over-correction in `sgwas-env`) |
+| `env_gc` | `TRUE` | Compute genomic inflation factor ($\lambda_{GC}$) and export calibrated `P_Trait_GC` and `P_Trait_GC_BH` columns |
 | `association_n_pcs` | `0L` | Additional genotype PCs in integrated fixed effects |
 | `association_max_missing` | `0.50` | Maximum missing dosage fraction per marker in `sgwas` scans |
 | `multitrait_missing` | `"impute"` | Multi-trait only: conditional imputation with observed-data inference, or `"complete_case"` |
@@ -410,6 +459,7 @@ systemsGWAS(
 
 ## Output files
 
+* **Environmental GWAS (`<projname>_env_gwas/`):** Outputs from `association_mode = "sgwas-env"`, including `ASSOCIATIONS.tsv` (with `Lambda_GC`, `P_Trait_GC`, and `P_Trait_GC_BH`), `NULL_MODELS.tsv`, `SAMPLE_AUDIT.tsv`, and ploidy-specific `Trait_marginal/` report folders.
 * **Feature preparation (`<projname>_microbial_traits/`, or nested inside `<projname>_integrated_gwas/<projname>_microbial_traits/` for weighted integrated runs):** Exports `*_composite.tsv`, `*_weights.tsv` (complete reference set), `*_selected_weights.tsv`, `*_gwas_phenotypes.tsv`, `*_summary.tsv`, `*_bootstrap.tsv` (for sPLS), and `*_model.rds`.
 * **Multi-trait phenotype GWAS (`<projname>_multitrait_gwas/`):** Long-form `ASSOCIATIONS.tsv`, `TRAIT_SET.tsv`, `TRAIT_COVARIANCES.tsv`, `NULL_MODELS.tsv`, `REML_ATTEMPTS.tsv`, `MULTITRAIT_MISSINGNESS.tsv`, sample audits, metadata and numbered trait/omnibus report folders. Each ploidy also has `IMPUTATION_MANIFEST.tsv` and `imputation/` exports (`COMPLETED_TRAITS.tsv`, `IMPUTED_VALUES.tsv`, `IMPUTATION_MASK.tsv`). BH FDR and Bonferroni are calculated across markers, encodings, traits and ploidies separately for each of the three test families; separate calls are not pooled.
 * **Base-R univariate GWAS (`<projname>_base_gwas/`):** Outputs from `association_mode = "sgwas-marginal"`.

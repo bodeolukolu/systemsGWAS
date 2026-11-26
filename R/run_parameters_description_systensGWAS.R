@@ -73,6 +73,7 @@ systemsGWAS(
   # INTEGRATED TRAIT + MICROBIAL/PHENOMIC ASSOCIATION
   # "gwaspoly-marginal": existing scans. Runs single trait without microbiome using GWASpoly; 
   # "sgwas-marginal (default)": Runs single trait without microbiome using Base-R REML/GLS;
+  # "sgwas-env": Runs environmental GWAS. Run with LOCO = TRUE, association_n_pcs = 0L, and test env_deflate_pcs = 0, 1, and 2.
   # "sgwas-multitrait": two or more traits
   # "sgwas-joint": two-trait mixed model;
   # "sgwas-interaction": SNP x microbial score; 
@@ -106,7 +107,7 @@ systemsGWAS(
   # GWAS CONTROLS
   # "MLM", "GLM", or both. Default: c("GLM","MLM"). Prefer MLM for kinship correction.
   # Legacy GLM modifies the supplied kinship; it is not a conventional no-kinship fit.
-  method = "MLM",
+  method = c("GLM","MLM"),
   # Standard diploid effect families: "Add" or c("Add","Dom"). Default: c("Add","Dom").
   # Integrated: "Add", "Dom", or both; omitted arguments choose MLM/Add.
   # Dom scans d-dom-alt/ref separately, d=1..ploidy/2 (not simultaneous Add + Dom).

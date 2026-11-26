@@ -1558,14 +1558,14 @@ systemsGWAS_prepare_microbiome <- function(
                       axis.title.x = ggplot2::element_text(size = 15, margin = margin(t = 12)),
                       axis.title.y = ggplot2::element_text(size = 15, margin = margin(r = 12)),
                       axis.text.y = ggplot2::element_text(size = 15, colour = "black"), strip.background = ggplot2::element_blank(),
-                      strip.text.x = ggplot2::element_text(size = 15, colour = "black"), strip.text.y = ggplot2::element_text(size = 12, colour = "black"),
+                      strip.text.x = ggplot2::element_text(size = 10, colour = "black"), strip.text.y = ggplot2::element_text(size = 12, colour = "black"),
                       legend.position = "top", legend.justification = "right",
                       legend.box.just = "right", legend.background = ggplot2::element_rect(fill = "white", colour = "white"),
                       legend.box.spacing = ggplot2::unit(0.2, "cm"), 
                       legend.margin = ggplot2::margin(t = 0, r = 0, b = 0, l = 0, unit = "pt"),
-                      legend.title = ggplot2::element_text(size = 17), legend.text = ggplot2::element_text(size = 15),
-                      legend.key.width = grid::unit(1.5, "cm"), legend.key.height = grid::unit(0.7, "cm"),
-                      plot.title = ggplot2::element_text(size = 5, hjust = 0.5, face = "plain", margin = margin(b = 15)),
+                      legend.title = ggplot2::element_text(size = 15), legend.text = ggplot2::element_text(size = 10),
+                      legend.key.width = grid::unit(1.0, "cm"), legend.key.height = grid::unit(0.5, "cm"),
+                      plot.title = ggplot2::element_text(size = 10, hjust = 0.5, face = "plain", margin = margin(b = 5)),
                       plot.margin = ggplot2::margin(t = 0, r = 0, b = 0, l = 0, unit = "pt")) +
                 labs(title = traitname, x = "Chromosomes and Physical Map Position (bp)",
                      y = "-log10(P)", colour = "Threshold", linetype = "Threshold") +
@@ -1718,6 +1718,17 @@ systemsGWAS_prepare_microbiome <- function(
   q
 }
 
+.sgwas_gc_adjust <- function(p) {
+  p_gc <- rep(NA_real_, length(p))
+  good <- is.finite(p) & p > 0 & p <= 1
+  if (!any(good)) return(list(p_gc = p_gc, lambda = NA_real_))
+  chisq <- qchisq(p[good], df = 1, lower.tail = FALSE)
+  lambda <- median(chisq, na.rm = TRUE) / qchisq(0.5, df = 1)
+  adj_factor <- max(1, lambda)
+  p_gc[good] <- pchisq(chisq / adj_factor, df = 1, lower.tail = FALSE)
+  list(p_gc = p_gc, lambda = lambda)
+}
+
 .sgwas_integer <- function(x, name, minimum=1L) {
   if(length(x)!=1L || !is.numeric(x) || !is.finite(x) || x<minimum || x!=floor(x))
     stop(name," must be an integer >= ",minimum)
@@ -1725,8 +1736,9 @@ systemsGWAS_prepare_microbiome <- function(
 }
 
 .sgwas_validate_integrated_models <- function(method, model_effect) {
-  if(!identical(.sgwas_names(method),"MLM"))
-    stop('The sgwas engine requires method = "MLM"')
+  m <- toupper(.sgwas_names(method))
+  if(length(m) != 1L || !m %in% c("MLM", "GLM"))
+    stop('The sgwas engine requires method = "MLM" or "GLM"')
   effects <- .sgwas_names(model_effect)
   if(!length(effects) || any(!effects %in% c("Add","Dom")))
     stop('Integrated model_effect must contain "Add", "Dom", or both')
@@ -1822,7 +1834,11 @@ systemsGWAS_prepare_microbiome <- function(
   list(G = G, centered = sweep(G, 2, mu, "-"), map = ledger[keep, , drop = FALSE], ledger = ledger)
 }
 
-.sgwas_kinship_eigen <- function(K_raw, denom) {
+.sgwas_kinship_eigen <- function(K_raw, denom, deflate_pcs = 0L, glm_mode = FALSE) {
+  n <- nrow(K_raw)
+  if (isTRUE(glm_mode)) {
+    return(list(values = rep(0, n), vectors = diag(1, n)))
+  }
   if (!is.finite(denom) || denom <= 1e-12) stop("No variable background markers are available for kinship")
   K <- ((K_raw + t(K_raw)) / 2) / denom
   
@@ -1839,6 +1855,11 @@ systemsGWAS_prepare_microbiome <- function(
   eg <- eigen(K, symmetric = TRUE)
   if (min(eg$values) < -1e-7 * max(eg$values)) stop("Kinship is not positive semidefinite")
   eg$values <- pmax(eg$values, 0)
+  if (deflate_pcs > 0L) {
+    ord <- order(eg$values, decreasing = TRUE)
+    drop_idx <- ord[seq_len(min(deflate_pcs, length(ord)))]
+    eg$values[drop_idx] <- 0
+  }
   eg
 }
 
@@ -2119,7 +2140,7 @@ systemsGWAS_prepare_microbiome <- function(
   }
 }
 
-.sgwas_report_specs <- function(results) {
+.sgwas_report_specs <- function(resultsuse_gc = env_mode && isTRUE(env_gc)) {
   specs <- data.frame(
     Test=c("Trait_marginal","Microbial_marginal","Trait_joint","Microbial_joint","Bivariate_joint",
            "SNP_at_mean","Interaction","SNP_joint"),
@@ -2147,7 +2168,7 @@ systemsGWAS_prepare_microbiome <- function(
 # as native GWASpoly fits, nor are joint p-values turned into separate-trait scans.
 .sgwas_gwas_results_reports <- function(results,outdir,all_results,fdr,bonferroni,suggestive,
                                         formats=c("pdf","tiff"),fdr_level=0.05) {
-  specs <- .sgwas_report_specs(results)
+  specs <- .sgwas_report_specs(resultsuse_gc = env_mode && isTRUE(env_gc))
   models <- unique(results$Marker_Model)
   root <- outdir; dir.create(root,showWarnings=FALSE)
   manifest <- list()
@@ -2265,12 +2286,12 @@ systemsGWAS_prepare_microbiome <- function(
                      axis.title.x = ggplot2::element_text(size = 15, margin = ggplot2::margin(t = 12)),
                      axis.title.y = ggplot2::element_text(size = 15, margin = ggplot2::margin(r = 12)),
                      axis.text.y = ggplot2::element_text(size = 15, colour = "black"), strip.background = ggplot2::element_blank(),
-                     strip.text.x = ggplot2::element_text(size = 15, colour = "black"), strip.text.y = ggplot2::element_text(size = 15, colour = "black"),
+                     strip.text.x = ggplot2::element_text(size = 10, colour = "black"), strip.text.y = ggplot2::element_text(size = 15, colour = "black"),
                      legend.position = "top", legend.justification = "right",
-                     legend.box.just = "right", legend.background = ggplot2::element_rect(fill = "white", colour = "white"), legend.title = ggplot2::element_text(size = 17),
-                     legend.text = ggplot2::element_text(size = 15), legend.key.width = grid::unit(1.5, "cm"),
-                     legend.key.height = grid::unit(0.7, "cm"), plot.title = ggplot2::element_text(size = 15, hjust = 0.5, face = "plain", margin = ggplot2::margin(b = 15)),
-                     plot.margin = ggplot2::margin(t = 15, r = 15, b = 15, l = 15)) +
+                     legend.box.just = "right", legend.background = ggplot2::element_rect(fill = "white", colour = "white"), legend.title = ggplot2::element_text(size = 10),
+                     legend.text = ggplot2::element_text(size = 10), legend.key.width = grid::unit(1.0, "cm"),
+                     legend.key.height = grid::unit(0.5, "cm"), plot.title = ggplot2::element_text(size = 15, hjust = 0.5, face = "plain", margin = ggplot2::margin(b = 5)),
+                     plot.margin = ggplot2::margin(t = 0, r = 0, b = 0, l = 0, unit = "pt")) +
       ggplot2::labs(title = label, x = "Chromosomes and Physical Map Position (bp)", y = "-log10(P)", colour = "Threshold", linetype = "Threshold") +
       ggplot2::coord_cartesian(clip = "off")
     
@@ -2314,8 +2335,10 @@ systemsGWAS_prepare_microbiome <- function(
 }
 
 .sgwas_integrated_gwas <- function(args,prepared,mode,n_pcs,max_missing,chunk_size,maxit,max_geno_freq=0.99,
-                                   output_style="verbose",plot_formats=c("pdf","tiff")) {
+                                   output_style="verbose",plot_formats=c("pdf","tiff"),
+                                   env_deflate_pcs=0L,env_gc=TRUE) {
   effects <- .sgwas_validate_integrated_models(args$method,args$model_effect)
+  glm_mode <- identical(toupper(.sgwas_names(args$method)), "GLM")
   if(length(args$perm)!=1L || !is.numeric(args$perm) || !is.finite(args$perm) || args$perm<0 || args$perm!=floor(args$perm))
     stop("perm must be a nonnegative integer")
   if(args$perm>=100) stop("Permutation thresholds are not implemented for integrated GWAS; use perm = 1")
@@ -2332,13 +2355,15 @@ systemsGWAS_prepare_microbiome <- function(
   if(is.null(ph)) stop("Integrated GWAS requires phenofile with the measured outcome")
   
   if(any(!c(traits,covs) %in% names(ph))) stop("Some requested traits/covariates are absent from phenofile")
-  marginal_only <- identical(mode, "sgwas-marginal")
+  env_mode <- identical(mode, "sgwas-env")
+  marginal_only <- mode %in% c("sgwas-marginal", "sgwas-env")
   if(!marginal_only && prepared$summary$Trait %in% c(traits,covs))
     stop("Use a microbial_trait_name distinct from outcomes and covariates")
   if(args$cores>1) message("[systemsGWAS] Base-R REML/GLS scans use serial vectorised chunks; cores controls the legacy GWASpoly engine only.")
   if(marginal_only) {
-    inference <- "standard_univariate"
-    outdir <- file.path(args$wdir,paste0(args$projname,"_base_gwas"))
+    inference <- if(env_mode) "env_gwas" else "standard_univariate"
+    suffix_dir <- if(env_mode) "_env_gwas" else "_base_gwas"
+    outdir <- file.path(args$wdir,paste0(args$projname,suffix_dir))
   } else {
     provenance <- tolower(prepared$summary$Source_Method)
     supervised <- isTRUE(provenance == "spls")
@@ -2397,11 +2422,12 @@ systemsGWAS_prepare_microbiome <- function(
       marker_denom <- ploidy * af * (1 - af)
       total_denom <- sum(marker_denom)
       cp <- tcrossprod(qc$centered)
-      full_eig <- .sgwas_kinship_eigen(cp, total_denom)
+      full_eig <- .sgwas_kinship_eigen(cp, total_denom, deflate_pcs = env_deflate_pcs, glm_mode = glm_mode)
       X <- cbind(Intercept=1,C)
       if(n_pcs) {
-        if(n_pcs>sum(full_eig$values>max(full_eig$values)*1e-8)) stop("Too few nonzero genomic PCs")
-        pcs <- full_eig$vectors[,seq_len(n_pcs),drop=FALSE]
+        pc_eig <- eigen(cp, symmetric = TRUE)
+        if(n_pcs>sum(pc_eig$values>max(pc_eig$values)*1e-8)) stop("Too few nonzero genomic PCs")
+        pcs <- pc_eig$vectors[,seq_len(n_pcs),drop=FALSE]
         colnames(pcs) <- paste0("Genotype_PC",seq_len(n_pcs)); X <- cbind(X,pcs)
       }
       if(qr(X)$rank<ncol(X)) stop("Collinear covariates/PCs in integrated GWAS for ",trait)
@@ -2420,7 +2446,9 @@ systemsGWAS_prepare_microbiome <- function(
         eg <- if(args$LOCO) {
           .sgwas_kinship_eigen(
             cp - tcrossprod(qc$centered[, selected, drop = FALSE]),
-            total_denom - sum(marker_denom[selected]))
+            total_denom - sum(marker_denom[selected]),
+            deflate_pcs = env_deflate_pcs,
+            glm_mode = glm_mode)
         } else {full_eig}
         message("[systemsGWAS] ",trait," + ",micro_name,"; ",ploidy,"x; ",length(ids)," samples; ",
                 length(selected)," markers; ",if(args$LOCO) paste0("LOCO ",ch) else "whole-genome kinship")
@@ -2477,6 +2505,17 @@ systemsGWAS_prepare_microbiome <- function(
     results[[paste0(p, "_BH")]] <- fdr_val
     bon_val <- rep(NA_real_, nrow(results)); bon_val[good] <- p.adjust(results[[p]][good], method = "bonferroni")
     results[[paste0(p, "_Bonferroni")]] <- bon_val
+  }
+  if (isTRUE(env_gc) && "P_Trait" %in% names(results)) {
+    results$Lambda_GC <- NA_real_
+    results$P_Trait_GC <- NA_real_
+    results$P_Trait_GC_BH <- NA_real_
+    for (ix in split(seq_len(nrow(results)), grp)) {
+      gc_res <- .sgwas_gc_adjust(results$P_Trait[ix])
+      results$Lambda_GC[ix] <- gc_res$lambda
+      results$P_Trait_GC[ix] <- gc_res$p_gc
+      results$P_Trait_GC_BH[ix] <- .sgwas_fdr(gc_res$p_gc)
+    }
   }
   .sgwas_write_tsv(results,file.path(outdir,"ASSOCIATIONS.tsv"))
   summary <- do.call(rbind,summaries); .sgwas_write_tsv(summary,file.path(outdir,"NULL_MODELS.tsv"))
@@ -2932,7 +2971,7 @@ systemsGWAS_prepare_microbiome <- function(
     allfits[[pkey]] <- list(); imputation_manifest <- list()
     for(ch in groups) {
       selected <- if(args$LOCO) which(qc$map$CHROM==ch) else seq_len(ncol(qc$G))
-      eg <- if(args$LOCO) .sgwas_kinship_eigen(cp-tcrossprod(qc$centered[,selected,drop=FALSE]),sum(denom[-selected])) else full
+      eg <- if(args$LOCO) .sgwas_kinship_eigen(cp-tcrossprod(qc$centered[,selected,drop=FALSE]),sum(denom[-selected]), deflate_pcs = env_deflate_pcs) else full
       message("[systemsGWAS] Multi-trait (",paste(traits,collapse=", "),"); ",pkey,"; ",length(ids)," samples; ",
               sum(!is.finite(Y))," missing phenotype cells; strategy=",policy$strategy,"; ",
               length(selected)," markers; ",if(args$LOCO) paste0("LOCO ",ch) else "whole-genome kinship")
@@ -3046,15 +3085,17 @@ systemsGWAS <- function(
     association_max_missing=0.50, association_chunk_size=256L,
     association_maxit=300L, association_geno_freq=0.99,
     association_output_style="verbose", association_plot_formats=c("tiff"),
-    multitrait_missing="impute", multitrait_missing_threshold=0.30) {
+    multitrait_missing="impute", multitrait_missing_threshold=0.30,
+    env_deflate_pcs=0L, env_gc=TRUE) {
   new_mode <- length(.sgwas_names(microbial_features)) > 0L || length(.sgwas_names(microbial_weights)) > 0L
   if (missing(association_mode) && new_mode) {
     association_mode <- "sgwas-all"
   }
   association_mode <- match.arg(
     tolower(association_mode),
-    c("sgwas-marginal", "gwaspoly-marginal", "sgwas-joint", "sgwas-interaction", "sgwas-all", "sgwas-multitrait")
+    c("sgwas-marginal", "sgwas-env", "gwaspoly-marginal", "sgwas-joint", "sgwas-interaction", "sgwas-all", "sgwas-multitrait")
   )
+  
   integrated <- association_mode != "gwaspoly-marginal"
   multitrait <- identical(association_mode,"sgwas-multitrait")
   if(multitrait) {
@@ -3070,12 +3111,14 @@ systemsGWAS <- function(
   }
   if (association_mode %in% c("sgwas-joint", "sgwas-interaction", "sgwas-all") && !new_mode)
     stop("sgwas-joint/sgwas-interaction/sgwas-all require microbial_features or microbial_weights")
-  if (association_mode == "sgwas-marginal" && new_mode)
-    stop("association_mode = 'sgwas-marginal' tests phenotypes without microbiome data; omit microbial_features/microbial_weights")
+  if (association_mode %in% c("sgwas-marginal", "sgwas-env") && new_mode)
+    stop("association_mode = '", association_mode, "' tests phenotypes without microbiome data; omit microbial_features/microbial_weights")
   if(integrated) {
     if(missing(method)) method <- "MLM"
     if(missing(model_effect)) model_effect <- "Add"
     .sgwas_validate_integrated_models(method,model_effect)
+    env_deflate_pcs <- .sgwas_integer(env_deflate_pcs,"env_deflate_pcs",0L)
+    if(length(env_gc)!=1L || !is.logical(env_gc) || is.na(env_gc)) stop("env_gc must be TRUE or FALSE")
     association_n_pcs <- .sgwas_integer(association_n_pcs,"association_n_pcs",0L)
     association_chunk_size <- .sgwas_integer(association_chunk_size,"association_chunk_size")
     association_maxit <- .sgwas_integer(association_maxit,"association_maxit")
@@ -3158,7 +3201,8 @@ systemsGWAS <- function(
                                                        multitrait_missing,multitrait_missing_threshold) else
                                                          if(integrated) .sgwas_integrated_gwas(args,prepared,association_mode,
                                                                                                association_n_pcs,association_max_missing,association_chunk_size,association_maxit,association_geno_freq,
-                                                                                               association_output_style,association_plot_formats) else
+                                                                                               association_output_style,association_plot_formats,
+                                                                                               env_deflate_pcs=env_deflate_pcs,env_gc=env_gc) else
                                                                                                  do.call(.systemsGWAS_engine,args)
   if(!is.null(prepared)) {prepared$gwas_result <- gwas_result;return(invisible(prepared))}
   invisible(gwas_result)
