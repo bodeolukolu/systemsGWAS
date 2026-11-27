@@ -124,6 +124,11 @@ systemsGWAS(
   maf = 0.02,
   # Rebuild kinship leaving out the tested chromosome. Default: FALSE; use with MLM.
   LOCO = FALSE,
+  # Number of leading genetic eigenvectors to deflate from the GRM before REML fitting
+  # Prevents macro-structure over-correction in sgwas-env
+  env_deflate_pcs=1L,
+  # Compute genomic inflation factor ($\lambda_{GC}$) and export calibrated `P_Trait_GC` and `P_Trait_GC_BH` columns
+  env_gc=TRUE,
   # GWASpoly workers. Default: 1. Integrated scans and sPLS bootstraps are serial.
   # Larger values do not parallelise these branches or set BLAS thread counts.
   cores = 1,

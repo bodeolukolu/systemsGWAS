@@ -2140,7 +2140,8 @@ systemsGWAS_prepare_microbiome <- function(
   }
 }
 
-.sgwas_report_specs <- function(resultsuse_gc = env_mode && isTRUE(env_gc)) {
+# Replace lines 726-737 with this:
+.sgwas_report_specs <- function(results) {
   specs <- data.frame(
     Test=c("Trait_marginal","Microbial_marginal","Trait_joint","Microbial_joint","Bivariate_joint",
            "SNP_at_mean","Interaction","SNP_joint"),
@@ -2168,7 +2169,7 @@ systemsGWAS_prepare_microbiome <- function(
 # as native GWASpoly fits, nor are joint p-values turned into separate-trait scans.
 .sgwas_gwas_results_reports <- function(results,outdir,all_results,fdr,bonferroni,suggestive,
                                         formats=c("pdf","tiff"),fdr_level=0.05) {
-  specs <- .sgwas_report_specs(resultsuse_gc = env_mode && isTRUE(env_gc))
+  specs <- .sgwas_report_specs(results)
   models <- unique(results$Marker_Model)
   root <- outdir; dir.create(root,showWarnings=FALSE)
   manifest <- list()
@@ -2506,7 +2507,7 @@ systemsGWAS_prepare_microbiome <- function(
     bon_val <- rep(NA_real_, nrow(results)); bon_val[good] <- p.adjust(results[[p]][good], method = "bonferroni")
     results[[paste0(p, "_Bonferroni")]] <- bon_val
   }
-  if (isTRUE(env_gc) && "P_Trait" %in% names(results)) {
+  if (env_mode && isTRUE(env_gc) && "P_Trait" %in% names(results)) {
     results$Lambda_GC <- NA_real_
     results$P_Trait_GC <- NA_real_
     results$P_Trait_GC_BH <- NA_real_
@@ -2911,6 +2912,43 @@ systemsGWAS_prepare_microbiome <- function(
   C_all <- matrix(numeric(),length(ids_all),0L,dimnames=list(NULL,character()))
   if(length(covs)) {C_all <- vapply(covs,function(t) .sgwas_id_values(ph,t,ids_all),numeric(length(ids_all))); colnames(C_all) <- covs}
   results <- audits <- nulls <- covariance <- attempts <- allfits <- missingness <- list()
+  
+  # Pre-flight check: detect linearly dependent / collinear traits before running GWAS
+  complete_rows <- rowSums(!is.finite(Y_all)) == 0L & rowSums(!is.finite(C_all)) == 0L
+  n_comp <- sum(complete_rows)
+  if (n_comp > ncol(C_all) + length(traits)) {
+    X_chk <- matrix(1, nrow = n_comp, ncol = 1L)
+    if (ncol(C_all)) X_chk <- cbind(X_chk, scale(C_all[complete_rows, , drop = FALSE]))
+    Y_chk <- scale(Y_all[complete_rows, , drop = FALSE])
+    if (all(is.finite(apply(Y_chk, 2, sd))) && qr(X_chk)$rank == ncol(X_chk)) {
+      res_chk <- qr.resid(qr(X_chk), Y_chk)
+      qr_res <- qr(res_chk, tol = 1e-6)
+      if (qr_res$rank < length(traits)) {
+        redundant <- traits[qr_res$pivot[(qr_res$rank + 1L):length(traits)]]
+        reason <- paste0(
+          "Multi-trait run stopped before GWAS: selected traits are linearly dependent or nearly collinear ",
+          "(e.g. one trait is a sum/difference of others). Redundant trait(s) detected: ",
+          paste(redundant, collapse = ", "),
+          ". Remove redundant trait(s) from trait_names and re-run."
+        )
+        .sgwas_write_tsv(
+          data.frame(Status = "stopped_collinear_traits", Mode = "sgwas-multitrait",
+                     Reason = reason, Time = as.character(Sys.time())),
+          file.path(outdir, "RUN_STATUS.tsv")
+        )
+        .sgwas_write_tsv(
+          data.frame(Trait_Set = paste(traits, collapse = ", "),
+                     Redundant_Traits = paste(redundant, collapse = ", "),
+                     Reason = reason),
+          file.path(outdir, "FAILED.tsv")
+        )
+        complete <- TRUE
+        message("[systemsGWAS] ", reason)
+        return(invisible(NULL))
+      }
+    }
+  }
+  
   for(ploidy in unique(as.numeric(args$ploidy_levels))) {
     pkey <- paste0(ploidy,"x"); folder <- file.path(outdir,pkey); dir.create(folder,showWarnings=FALSE)
     raw <- .sgwas_read_dosage(args[[paste0("genofile_",ploidy,"x")]],ploidy)
@@ -2971,7 +3009,7 @@ systemsGWAS_prepare_microbiome <- function(
     allfits[[pkey]] <- list(); imputation_manifest <- list()
     for(ch in groups) {
       selected <- if(args$LOCO) which(qc$map$CHROM==ch) else seq_len(ncol(qc$G))
-      eg <- if(args$LOCO) .sgwas_kinship_eigen(cp-tcrossprod(qc$centered[,selected,drop=FALSE]),sum(denom[-selected]), deflate_pcs = env_deflate_pcs) else full
+      eg <- if(args$LOCO) .sgwas_kinship_eigen(cp-tcrossprod(qc$centered[,selected,drop=FALSE]),sum(denom[-selected])) else full
       message("[systemsGWAS] Multi-trait (",paste(traits,collapse=", "),"); ",pkey,"; ",length(ids)," samples; ",
               sum(!is.finite(Y))," missing phenotype cells; strategy=",policy$strategy,"; ",
               length(selected)," markers; ",if(args$LOCO) paste0("LOCO ",ch) else "whole-genome kinship")
@@ -3119,6 +3157,9 @@ systemsGWAS <- function(
     .sgwas_validate_integrated_models(method,model_effect)
     env_deflate_pcs <- .sgwas_integer(env_deflate_pcs,"env_deflate_pcs",0L)
     if(length(env_gc)!=1L || !is.logical(env_gc) || is.na(env_gc)) stop("env_gc must be TRUE or FALSE")
+    if (!identical(association_mode, "sgwas-env") && env_deflate_pcs > 0L) {
+      stop("env_deflate_pcs > 0 is only supported when association_mode = 'sgwas-env'")
+    }
     association_n_pcs <- .sgwas_integer(association_n_pcs,"association_n_pcs",0L)
     association_chunk_size <- .sgwas_integer(association_chunk_size,"association_chunk_size")
     association_maxit <- .sgwas_integer(association_maxit,"association_maxit")

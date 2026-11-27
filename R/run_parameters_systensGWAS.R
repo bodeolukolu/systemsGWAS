@@ -61,6 +61,8 @@ systemsGWAS(
   covariate_metag = FALSE,
   maf = 0.02,
   LOCO = FALSE,
+  env_deflate_pcs=1L,
+  env_gc=TRUE,
   cores = 3,
   fdr = TRUE,
   bonferroni = TRUE,
